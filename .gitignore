@@ -17,4 +17,4 @@ backend/generated/
 Thumbs.db
 
 *.log
-npm-debug.log*
+npm-debug.log**.pdf
