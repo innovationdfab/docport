@@ -1,4 +1,5 @@
 from pathlib import Path
+import tempfile
 from datetime import datetime
 import posixpath
 import re
@@ -26,7 +27,8 @@ TEMPLATE_PATH = (
     / "ExportFlow_Master_Template.xlsx"
 )
 
-GENERATED_DIR = BASE_DIR / "generated"
+GENERATED_DIR = Path(tempfile.gettempdir()) / "docport-generated"
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =========================================================

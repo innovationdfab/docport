@@ -1,4 +1,5 @@
 import asyncio
+import io
 import os
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 from starlette.background import BackgroundTask
 
 
@@ -21,14 +23,20 @@ from starlette.background import BackgroundTask
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT_DIR / "backend"
 
-# Load local environment variables.
 load_dotenv(ROOT_DIR / ".env.local")
 
-# Allow this API to reuse the existing DocPort backend.
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+
+# Existing approved DocPort Excel system.
 from excel_generator import generate_excel, MAX_PRODUCTS
+
+# New deterministic local invoice parser.
+from local_invoice_parser import (
+    parse_invoice_locally,
+    local_result_is_complete,
+)
 
 
 # ============================================================
@@ -37,15 +45,12 @@ from excel_generator import generate_excel, MAX_PRODUCTS
 
 app = FastAPI(
     title="DocPort API",
-    version="1.0.0",
+    version="3.0.0",
 )
 
 
 # ============================================================
 # CORS
-#
-# Allows the Vite development website running on port 5173
-# to communicate with this API on port 8001.
 # ============================================================
 
 app.add_middleware(
@@ -61,7 +66,7 @@ app.add_middleware(
 
 
 # ============================================================
-# STRUCTURED GEMINI RESPONSE MODELS
+# STRUCTURED DATA MODELS
 # ============================================================
 
 
@@ -75,48 +80,25 @@ class InvoiceData(BaseModel):
 class PartyData(BaseModel):
     name: Optional[str] = None
 
-    contact: Optional[str] = Field(
-        default=None,
-        description=(
-            "Actual named contact person only. "
-            "Do not copy a company name into this field "
-            "unless explicitly identified as the contact."
-        ),
-    )
+    contact: Optional[str] = None
 
     address: Optional[str] = None
 
-    raw_section: Optional[str] = Field(
-        default=None,
-        description=(
-            "Complete useful visible address/contact block "
-            "for this party."
-        ),
-    )
+    raw_section: Optional[str] = None
 
     email: Optional[str] = None
+
     phone: Optional[str] = None
+
     country: Optional[str] = None
 
 
 class LineItem(BaseModel):
     part_number: Optional[str] = None
 
-    description: Optional[str] = Field(
-        default=None,
-        description=(
-            "Useful product description exactly once. "
-            "Do not duplicate the same filename."
-        ),
-    )
+    description: Optional[str] = None
 
-    material: Optional[str] = Field(
-        default=None,
-        description=(
-            "Material grade exactly as printed. "
-            "Preserve numbers, punctuation and spacing."
-        ),
-    )
+    material: Optional[str] = None
 
     net_weight_kg: Optional[float] = None
 
@@ -197,21 +179,15 @@ class BankData(BaseModel):
         default=None,
         description=(
             "Bank AD Code only. "
-            "Never put a SWIFT or BIC code here."
+            "Do not put SWIFT/BIC here."
         ),
     )
 
     account_number: Optional[str] = None
 
-    ifsc: Optional[str] = Field(
-        default=None,
-        description="Indian IFSC code only.",
-    )
+    ifsc: Optional[str] = None
 
-    swift_code: Optional[str] = Field(
-        default=None,
-        description="SWIFT/BIC code when explicitly present.",
-    )
+    swift_code: Optional[str] = None
 
 
 class ExtractedData(BaseModel):
@@ -253,75 +229,33 @@ class ExtractedData(BaseModel):
 
 
 # ============================================================
-# GEMINI EXTRACTION PROMPT
+# GEMINI FALLBACK PROMPT
+#
+# Gemini is NOT used for normal supported invoices.
+# It is used only when local parsing fails.
 # ============================================================
 
-EXTRACTION_PROMPT = """
-You are the PDF extraction engine for DocPort.
+GEMINI_FALLBACK_PROMPT = """
+You are the fallback invoice extraction engine for DocPort.
 
-The attached PDF is a commercial/export invoice.
+Read the attached commercial/export invoice PDF carefully.
 
-Read the ENTIRE PDF carefully before returning data.
+Extract only information explicitly visible in the document.
 
-Extract only information that is actually visible in the document.
+Never invent or assume missing values.
 
-Never invent, infer, assume, calculate or manufacture missing values.
+Return null for absent or uncertain values.
 
-If a field is absent, unclear or uncertain, return null.
-
-Accuracy is more important than filling every field.
-
-
-============================================================
-INVOICE
-============================================================
-
-Extract:
-
-- commercial invoice number
-- invoice date
-- order date only when explicitly shown
-- purchase order / PO number
-
-Preserve identifiers exactly as printed.
-
-When a date is clearly identifiable, normalize it to:
-
-DD/MM/YYYY
-
-
-============================================================
-PARTIES
-============================================================
-
-Keep all parties separate:
+Keep these parties separate:
 
 - exporter / shipper
 - importer
 - consignee / ship-to
 - sold-to
 
-Do not mix their names, addresses, contacts, email addresses or
-phone numbers.
+Extract every visible product line in its original order.
 
-For raw_section, preserve the complete useful visible block for
-that party.
-
-For contact, return an actual contact person only.
-
-Do not copy the company name into the contact field unless the
-document explicitly identifies it as the contact.
-
-
-============================================================
-PRODUCTS
-============================================================
-
-Extract every visible product line in the same order as the PDF.
-
-Do not merge different products.
-
-For every product extract separately:
+For every product keep these fields separate:
 
 - part_number
 - description
@@ -335,137 +269,26 @@ For every product extract separately:
 - unit_price
 - position_price
 
+Do not duplicate product descriptions.
 
-DESCRIPTION:
+Preserve material grades correctly.
 
-Do not repeat the same product name or filename twice.
+Keep product net weight separate from package/gross shipment weight.
 
-Example:
+Do not calculate missing prices, exchange rates, AWB numbers,
+Shipping Bill numbers or other missing fields.
 
-Wrong:
-Ultrasonic_toolchangerplate A.1.stp, prototype,
-Ultrasonic_toolchangerplate A.1.stp
+bank.code means Bank AD Code only.
 
-Correct:
-Ultrasonic_toolchangerplate A.1.stp, prototype
+SWIFT/BIC must go only into bank.swift_code.
 
+IFSC must go only into bank.ifsc.
 
-MATERIAL:
+Do not choose Excel cells.
 
-Preserve material grade numbers exactly.
+Do not create or redesign Excel.
 
-Example:
-
-3.3211
-
-must not become:
-
-3.3 211
-
-
-WEIGHT:
-
-product.line_items[].net_weight_kg is the net weight of the
-individual product line.
-
-shipment.package_weight_kg is the gross/package shipment weight.
-
-shipment.net_weight_kg is the total shipment net weight only when
-explicitly printed.
-
-Do not confuse these weights.
-
-
-PRICES:
-
-unit_price is price per unit.
-
-position_price is the printed total amount for that product line.
-
-Do not calculate a missing position_price.
-
-
-============================================================
-SHIPMENT
-============================================================
-
-Extract when explicitly available:
-
-- package dimensions
-- package/gross weight
-- overall net shipment weight
-- total quantity
-- total amount
-- currency
-- exchange rate
-- AWB number
-- Shipping Bill number
-- Shipping Bill date
-- freight
-- insurance
-- commission
-- discount
-- packing charges
-- package count
-- state of origin
-- district of origin
-- RoDTEP information
-
-Never fabricate these fields.
-
-If exchange rate is not printed, return null.
-
-If AWB is not printed, return null.
-
-If Shipping Bill information is not printed, return null.
-
-
-============================================================
-BANK INFORMATION
-============================================================
-
-Be very careful with bank codes.
-
-bank.code means BANK AD CODE only.
-
-A SWIFT/BIC code must NEVER be placed in bank.code.
-
-Place SWIFT/BIC only in:
-
-bank.swift_code
-
-Place IFSC only in:
-
-bank.ifsc
-
-If AD Code is not explicitly identified in the PDF:
-
-bank.code = null
-
-
-============================================================
-COMPANY IDENTIFIERS
-============================================================
-
-Extract IEC and GSTIN only when explicitly printed.
-
-Do not infer them.
-
-
-============================================================
-EXCEL
-============================================================
-
-Do NOT choose Excel cells.
-
-Do NOT generate an Excel workbook.
-
-Do NOT change document formatting.
-
-Do NOT decide where data belongs in Excel.
-
-DocPort's existing deterministic field_mapping.py and
-excel_generator.py control all Excel placement and formatting.
+DocPort's existing Excel mapping system handles workbook generation.
 """
 
 
@@ -476,12 +299,17 @@ excel_generator.py control all Excel placement and formatting.
 
 def get_gemini_client():
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
 
     if not api_key:
+
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is not configured.",
+            detail=(
+                "GEMINI_API_KEY is not configured."
+            ),
         )
 
     return genai.Client(
@@ -490,16 +318,445 @@ def get_gemini_client():
 
 
 # ============================================================
+# LOCAL PDF TEXT EXTRACTION
+#
+# ZERO GEMINI TOKENS
+# ============================================================
+
+
+def extract_pdf_text_locally(
+    pdf_bytes: bytes,
+) -> str:
+
+    try:
+
+        reader = PdfReader(
+            io.BytesIO(pdf_bytes)
+        )
+
+        pages = []
+
+        for page_number, page in enumerate(
+            reader.pages,
+            start=1,
+        ):
+
+            try:
+
+                page_text = (
+                    page.extract_text()
+                    or ""
+                )
+
+            except Exception:
+
+                page_text = ""
+
+            page_text = page_text.strip()
+
+            if page_text:
+
+                pages.append(
+                    (
+                        f"\n--- PAGE {page_number} ---\n"
+                        f"{page_text}"
+                    )
+                )
+
+        return "\n".join(
+            pages
+        ).strip()
+
+    except Exception as exc:
+
+        print(
+            f"Local PDF reading failed: {exc}"
+        )
+
+        return ""
+
+
+# ============================================================
+# CHECK IF PDF CONTAINS USABLE TEXT
+# ============================================================
+
+
+def has_usable_invoice_text(
+    text: str,
+) -> bool:
+
+    if not text:
+
+        return False
+
+    if len(text) < 200:
+
+        return False
+
+    lowered = text.lower()
+
+    invoice_signals = [
+        "invoice",
+        "shipper",
+        "exporter",
+        "consignee",
+        "ship to",
+        "purchase order",
+        "goods description",
+        "unit price",
+        "position price",
+        "packaging",
+        "total",
+    ]
+
+    matches = sum(
+        1
+        for signal in invoice_signals
+        if signal in lowered
+    )
+
+    return matches >= 2
+
+
+# ============================================================
+# TEMPORARY GEMINI ERRORS
+# ============================================================
+
+
+def is_temporary_gemini_error(
+    error: Exception,
+) -> bool:
+
+    text = str(error).upper()
+
+    markers = [
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "RESOURCE_EXHAUSTED",
+        "UNAVAILABLE",
+        "HIGH DEMAND",
+        "OVERLOADED",
+        "TIMEOUT",
+        "DEADLINE_EXCEEDED",
+    ]
+
+    return any(
+        marker in text
+        for marker in markers
+    )
+
+
+# ============================================================
+# PARSE GEMINI RESPONSE
+# ============================================================
+
+
+def parse_gemini_response(
+    response,
+) -> ExtractedData:
+
+    if response is None:
+
+        raise ValueError(
+            "Gemini returned no response."
+        )
+
+    parsed = getattr(
+        response,
+        "parsed",
+        None,
+    )
+
+    if isinstance(
+        parsed,
+        ExtractedData,
+    ):
+
+        return parsed
+
+    if parsed is not None:
+
+        return ExtractedData.model_validate(
+            parsed
+        )
+
+    response_text = getattr(
+        response,
+        "text",
+        None,
+    )
+
+    if response_text:
+
+        return ExtractedData.model_validate_json(
+            response_text
+        )
+
+    raise ValueError(
+        "Gemini returned an empty response."
+    )
+
+
+# ============================================================
+# GEMINI PDF FALLBACK
+#
+# Only called if local parsing fails.
+# ============================================================
+
+
+async def extract_with_gemini_fallback(
+    pdf_bytes: bytes,
+) -> ExtractedData:
+
+    client = get_gemini_client()
+
+    model = os.getenv(
+        "GEMINI_MODEL",
+        "gemini-3.8-flash",
+    )
+
+    pdf_part = types.Part.from_bytes(
+        data=pdf_bytes,
+        mime_type="application/pdf",
+    )
+
+    last_error = None
+
+    # Maximum 2 attempts.
+    #
+    # No long 2s/4s/8s retry chain.
+    for attempt in range(2):
+
+        try:
+
+            print(
+                (
+                    "Gemini fallback attempt "
+                    f"{attempt + 1}/2 "
+                    f"using {model}"
+                )
+            )
+
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+
+                model=model,
+
+                contents=[
+                    pdf_part,
+                    GEMINI_FALLBACK_PROMPT,
+                ],
+
+                config=types.GenerateContentConfig(
+                    response_mime_type=(
+                        "application/json"
+                    ),
+
+                    response_schema=(
+                        ExtractedData
+                    ),
+
+                    temperature=0,
+                ),
+            )
+
+            return parse_gemini_response(
+                response
+            )
+
+        except Exception as exc:
+
+            last_error = exc
+
+            if not is_temporary_gemini_error(
+                exc
+            ):
+
+                raise
+
+            if attempt == 0:
+
+                print(
+                    (
+                        "Gemini temporarily busy. "
+                        "One quick retry..."
+                    )
+                )
+
+                await asyncio.sleep(1)
+
+    print(
+        (
+            "Gemini fallback failed after "
+            f"quick retry: {last_error}"
+        )
+    )
+
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Gemini fallback is temporarily busy. "
+            "Please retry this invoice shortly."
+        ),
+    )
+
+
+# ============================================================
+# MAIN SMART EXTRACTION
+#
+# THIS IS THE IMPORTANT PART.
+#
+# 1. pypdf locally
+# 2. local deterministic parser
+# 3. Gemini ONLY when necessary
+# ============================================================
+
+
+async def smart_extract_invoice(
+    pdf_bytes: bytes,
+):
+
+    # --------------------------------------------------------
+    # STEP 1
+    # Read PDF locally.
+    # --------------------------------------------------------
+
+    invoice_text = await asyncio.to_thread(
+        extract_pdf_text_locally,
+        pdf_bytes,
+    )
+
+    print(
+        (
+            "Local PDF text characters: "
+            f"{len(invoice_text)}"
+        )
+    )
+
+    # --------------------------------------------------------
+    # STEP 2
+    # Try local deterministic parser first.
+    #
+    # NO GEMINI
+    # NO AI TOKENS
+    # --------------------------------------------------------
+
+    if has_usable_invoice_text(
+        invoice_text
+    ):
+
+        print(
+            "Trying DocPort local invoice parser..."
+        )
+
+        try:
+
+            local_data = (
+                parse_invoice_locally(
+                    invoice_text
+                )
+            )
+
+            if local_result_is_complete(
+                local_data
+            ):
+
+                extracted = (
+                    ExtractedData.model_validate(
+                        local_data
+                    )
+                )
+
+                print(
+                    "========================================"
+                )
+
+                print(
+                    "LOCAL PARSER SUCCESS"
+                )
+
+                print(
+                    "GEMINI NOT USED"
+                )
+
+                print(
+                    "========================================"
+                )
+
+                return (
+                    extracted,
+                    invoice_text,
+                    "local_parser",
+                )
+
+            print(
+                (
+                    "Local parser did not find "
+                    "enough required fields."
+                )
+            )
+
+        except Exception as exc:
+
+            print(
+                (
+                    "Local parser error: "
+                    f"{exc}"
+                )
+            )
+
+    else:
+
+        print(
+            (
+                "PDF text is missing or "
+                "not readable enough locally."
+            )
+        )
+
+    # --------------------------------------------------------
+    # STEP 3
+    # Only now use Gemini.
+    # --------------------------------------------------------
+
+    print(
+        "Using Gemini PDF fallback..."
+    )
+
+    extracted = (
+        await extract_with_gemini_fallback(
+            pdf_bytes
+        )
+    )
+
+    return (
+        extracted,
+        invoice_text,
+        "gemini_pdf_fallback",
+    )
+
+
+# ============================================================
 # MISSING FIELD HELPERS
 # ============================================================
 
 
-def is_missing(value):
+def is_missing(
+    value,
+):
 
     if value is None:
+
         return True
 
-    if isinstance(value, str):
+    if isinstance(
+        value,
+        str,
+    ):
+
         return value.strip() == ""
 
     return False
@@ -559,14 +816,19 @@ def build_missing_fields(
 
     for field_name, value in important_fields:
 
-        if is_missing(value):
-            missing.append(field_name)
+        if is_missing(
+            value
+        ):
+
+            missing.append(
+                field_name
+            )
 
     for index, item in enumerate(
         data.product.line_items
     ):
 
-        product_fields = [
+        fields = [
             (
                 "part_number",
                 item.part_number,
@@ -605,9 +867,11 @@ def build_missing_fields(
             ),
         ]
 
-        for field_name, value in product_fields:
+        for field_name, value in fields:
 
-            if is_missing(value):
+            if is_missing(
+                value
+            ):
 
                 missing.append(
                     (
@@ -621,195 +885,6 @@ def build_missing_fields(
 
 
 # ============================================================
-# TEMPORARY GEMINI ERROR DETECTION
-# ============================================================
-
-
-def is_temporary_gemini_error(
-    error: Exception,
-):
-
-    error_text = str(error).upper()
-
-    temporary_markers = [
-        "429",
-        "500",
-        "502",
-        "503",
-        "504",
-        "RESOURCE_EXHAUSTED",
-        "UNAVAILABLE",
-        "HIGH DEMAND",
-        "OVERLOADED",
-        "TIMEOUT",
-        "DEADLINE_EXCEEDED",
-    ]
-
-    return any(
-        marker in error_text
-        for marker in temporary_markers
-    )
-
-
-# ============================================================
-# GEMINI EXTRACTION WITH RETRIES
-# ============================================================
-
-
-async def extract_with_gemini(
-    pdf_bytes: bytes,
-):
-
-    client = get_gemini_client()
-
-    # Uses the model configured in .env.local.
-    #
-    # Your current working .env.local should contain:
-    #
-    # GEMINI_MODEL=gemini-3.8-flash
-    #
-    model = os.getenv(
-        "GEMINI_MODEL",
-        "gemini-3.8-flash",
-    )
-
-    pdf_part = types.Part.from_bytes(
-        data=pdf_bytes,
-        mime_type="application/pdf",
-    )
-
-    # First attempt immediately.
-    #
-    # If Gemini temporarily returns 429/503/etc:
-    #
-    # attempt 2 -> wait 2 seconds
-    # attempt 3 -> wait 4 seconds
-    # attempt 4 -> wait 8 seconds
-    #
-    retry_delays = [
-        0,
-        2,
-        4,
-        8,
-    ]
-
-    last_error = None
-
-    for attempt_number, delay in enumerate(
-        retry_delays,
-        start=1,
-    ):
-
-        if delay > 0:
-
-            print(
-                (
-                    "Gemini temporarily unavailable. "
-                    f"Retrying in {delay} seconds..."
-                )
-            )
-
-            await asyncio.sleep(delay)
-
-        try:
-
-            print(
-                (
-                    "DocPort Gemini extraction "
-                    f"attempt {attempt_number}/"
-                    f"{len(retry_delays)} "
-                    f"using {model}"
-                )
-            )
-
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-
-                model=model,
-
-                contents=[
-                    pdf_part,
-                    EXTRACTION_PROMPT,
-                ],
-
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ExtractedData,
-                    temperature=0,
-                ),
-            )
-
-            if response is None:
-                raise ValueError(
-                    "Gemini returned no response."
-                )
-
-            parsed = getattr(
-                response,
-                "parsed",
-                None,
-            )
-
-            if isinstance(
-                parsed,
-                ExtractedData,
-            ):
-                return parsed
-
-            if parsed is not None:
-
-                return ExtractedData.model_validate(
-                    parsed
-                )
-
-            response_text = getattr(
-                response,
-                "text",
-                None,
-            )
-
-            if response_text:
-
-                return ExtractedData.model_validate_json(
-                    response_text
-                )
-
-            raise ValueError(
-                "Gemini returned an empty structured response."
-            )
-
-        except Exception as exc:
-
-            last_error = exc
-
-            if not is_temporary_gemini_error(
-                exc
-            ):
-                raise
-
-            print(
-                (
-                    f"Gemini attempt "
-                    f"{attempt_number} failed "
-                    f"temporarily: {exc}"
-                )
-            )
-
-    print(
-        f"Gemini retries exhausted: {last_error}"
-    )
-
-    raise HTTPException(
-        status_code=503,
-        detail=(
-            "Gemini is temporarily busy after "
-            "multiple automatic attempts. "
-            "Please retry the invoice shortly."
-        ),
-    )
-
-
-# ============================================================
 # API STATUS
 # ============================================================
 
@@ -820,12 +895,25 @@ def api_home():
     return {
         "service": "DocPort",
         "status": "online",
+        "version": "3.0.0",
+
         "gemini_configured": bool(
-            os.getenv("GEMINI_API_KEY")
+            os.getenv(
+                "GEMINI_API_KEY"
+            )
         ),
+
         "gemini_model": os.getenv(
             "GEMINI_MODEL",
             "gemini-3.8-flash",
+        ),
+
+        "primary_extraction": (
+            "local_parser"
+        ),
+
+        "fallback_extraction": (
+            "gemini_pdf"
         ),
     }
 
@@ -836,18 +924,12 @@ def api_health():
     return {
         "ok": True,
         "service": "DocPort",
-        "gemini_configured": bool(
-            os.getenv("GEMINI_API_KEY")
-        ),
-        "gemini_model": os.getenv(
-            "GEMINI_MODEL",
-            "gemini-3.8-flash",
-        ),
+        "version": "3.0.0",
     }
 
 
 # ============================================================
-# PDF EXTRACTION
+# PDF EXTRACTION ENDPOINT
 # ============================================================
 
 
@@ -862,8 +944,11 @@ async def extract_invoice(
     )
 
     is_pdf = (
-        file.content_type == "application/pdf"
-        or filename.lower().endswith(".pdf")
+        file.content_type
+        == "application/pdf"
+        or filename.lower().endswith(
+            ".pdf"
+        )
     )
 
     if not is_pdf:
@@ -882,10 +967,11 @@ async def extract_invoice(
 
         raise HTTPException(
             status_code=400,
-            detail="The uploaded PDF is empty.",
+            detail=(
+                "The uploaded PDF is empty."
+            ),
         )
 
-    # 50 MB upload limit.
     if len(pdf_bytes) > (
         50 * 1024 * 1024
     ):
@@ -900,7 +986,11 @@ async def extract_invoice(
 
     try:
 
-        extracted = await extract_with_gemini(
+        (
+            extracted,
+            local_text,
+            extraction_mode,
+        ) = await smart_extract_invoice(
             pdf_bytes
         )
 
@@ -914,12 +1004,10 @@ async def extract_invoice(
                 status_code=422,
                 detail=(
                     "No product line items "
-                    "were detected in the PDF."
+                    "were detected."
                 ),
             )
 
-        # Your current approved master workbook has
-        # a fixed number of product rows.
         if product_count > MAX_PRODUCTS:
 
             raise HTTPException(
@@ -927,14 +1015,29 @@ async def extract_invoice(
                 detail=(
                     f"The invoice contains "
                     f"{product_count} products, "
-                    f"but the current approved "
-                    f"Excel template supports "
+                    f"but the approved Excel "
+                    f"template currently supports "
                     f"{MAX_PRODUCTS} products."
                 ),
             )
 
+        print(
+            (
+                "Extraction completed: "
+                f"{filename}"
+            )
+        )
+
+        print(
+            (
+                "Extraction mode: "
+                f"{extraction_mode}"
+            )
+        )
+
         return {
-            "filename": filename,
+            "filename":
+                filename,
 
             "extracted":
                 extracted.model_dump(),
@@ -944,36 +1047,43 @@ async def extract_invoice(
                     extracted
                 ),
 
-            # Kept for compatibility with the existing
-            # DocPort frontend/backend data structure.
-            "raw_text": "",
+            # Keep existing DocPort compatibility.
+            "raw_text":
+                local_text,
+
+            # Extra debugging/info field.
+            "extraction_mode":
+                extraction_mode,
         }
 
     except HTTPException:
+
         raise
 
     except Exception as exc:
 
         print(
             (
-                "DocPort Gemini extraction "
-                f"failed: {exc}"
+                "DocPort extraction failed: "
+                f"{exc}"
             )
         )
 
         raise HTTPException(
             status_code=500,
             detail=(
-                "Gemini PDF extraction failed: "
+                "Invoice extraction failed: "
                 f"{exc}"
             ),
         )
 
 
 # ============================================================
-# EXISTING DOCPORT EXCEL GENERATOR
+# EXISTING EXCEL GENERATION
 #
-# Gemini DOES NOT design or generate the workbook.
+# IMPORTANT:
+#
+# Nothing here changes your Excel layout.
 #
 # Existing:
 #
@@ -981,7 +1091,7 @@ async def extract_invoice(
 # backend/excel_generator.py
 # backend/templates/ExportFlow_Master_Template.xlsx
 #
-# continue to control the exact Excel layout.
+# remain responsible for your six-sheet workbook.
 # ============================================================
 
 
@@ -1001,11 +1111,16 @@ async def generate_document(
         if not output_path.exists():
 
             raise FileNotFoundError(
-                "The Excel workbook was not generated."
+                (
+                    "Excel workbook "
+                    "was not generated."
+                )
             )
 
         return FileResponse(
-            path=str(output_path),
+            path=str(
+                output_path
+            ),
 
             media_type=(
                 "application/"
@@ -1013,7 +1128,9 @@ async def generate_document(
                 "spreadsheetml.sheet"
             ),
 
-            filename=output_path.name,
+            filename=(
+                output_path.name
+            ),
 
             background=BackgroundTask(
                 lambda:
@@ -1027,8 +1144,8 @@ async def generate_document(
 
         print(
             (
-                "DocPort Excel generation "
-                f"failed: {exc}"
+                "DocPort Excel generation failed: "
+                f"{exc}"
             )
         )
 
