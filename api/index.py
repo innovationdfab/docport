@@ -6,6 +6,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from google import genai
 from google.genai import types
@@ -14,16 +15,16 @@ from starlette.background import BackgroundTask
 
 
 # ============================================================
-# DOCPORT PROJECT PATHS
+# PROJECT PATHS
 # ============================================================
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT_DIR / "backend"
 
-# Local development environment.
+# Load local environment variables.
 load_dotenv(ROOT_DIR / ".env.local")
 
-# Allow this API to reuse the existing approved Excel code.
+# Allow this API to reuse the existing DocPort backend.
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
@@ -31,7 +32,7 @@ from excel_generator import generate_excel, MAX_PRODUCTS
 
 
 # ============================================================
-# FASTAPI APP
+# FASTAPI
 # ============================================================
 
 app = FastAPI(
@@ -41,34 +42,34 @@ app = FastAPI(
 
 
 # ============================================================
-# GEMINI STRUCTURED OUTPUT
+# CORS
 #
-# IMPORTANT:
-# These field names are kept compatible with the existing
-# DocPort frontend and existing Excel generator.
+# Allows the Vite development website running on port 5173
+# to communicate with this API on port 8001.
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# STRUCTURED GEMINI RESPONSE MODELS
 # ============================================================
 
 
 class InvoiceData(BaseModel):
-    number: Optional[str] = Field(
-        default=None,
-        description="Commercial invoice number exactly as printed.",
-    )
-
-    date: Optional[str] = Field(
-        default=None,
-        description="Commercial invoice date in DD/MM/YYYY when clear.",
-    )
-
-    order_date: Optional[str] = Field(
-        default=None,
-        description="Order date only when explicitly shown.",
-    )
-
-    po_number: Optional[str] = Field(
-        default=None,
-        description="Purchase order number exactly as printed.",
-    )
+    number: Optional[str] = None
+    date: Optional[str] = None
+    order_date: Optional[str] = None
+    po_number: Optional[str] = None
 
 
 class PartyData(BaseModel):
@@ -77,8 +78,9 @@ class PartyData(BaseModel):
     contact: Optional[str] = Field(
         default=None,
         description=(
-            "Explicit contact person only. "
-            "Do not copy the company name into contact."
+            "Actual named contact person only. "
+            "Do not copy a company name into this field "
+            "unless explicitly identified as the contact."
         ),
     )
 
@@ -87,7 +89,8 @@ class PartyData(BaseModel):
     raw_section: Optional[str] = Field(
         default=None,
         description=(
-            "Complete visible address/contact block for this party."
+            "Complete useful visible address/contact block "
+            "for this party."
         ),
     )
 
@@ -97,45 +100,29 @@ class PartyData(BaseModel):
 
 
 class LineItem(BaseModel):
-    part_number: Optional[str] = Field(
-        default=None,
-        description="Product or part number exactly as printed.",
-    )
+    part_number: Optional[str] = None
 
     description: Optional[str] = Field(
         default=None,
         description=(
-            "Product description exactly once. "
-            "Do not duplicate the same product/file name."
+            "Useful product description exactly once. "
+            "Do not duplicate the same filename."
         ),
     )
 
     material: Optional[str] = Field(
         default=None,
         description=(
-            "Material designation exactly as printed. "
-            "Preserve grade punctuation and spacing accurately."
+            "Material grade exactly as printed. "
+            "Preserve numbers, punctuation and spacing."
         ),
     )
 
-    net_weight_kg: Optional[float] = Field(
-        default=None,
-        description="Net weight for this individual product line.",
-    )
+    net_weight_kg: Optional[float] = None
 
-    hs_code: Optional[str] = Field(
-        default=None,
-        description=(
-            "HS/HTS code printed for this individual product line."
-        ),
-    )
+    hs_code: Optional[str] = None
 
-    india_hsn: Optional[str] = Field(
-        default=None,
-        description=(
-            "Indian HSN only if explicitly printed in the PDF."
-        ),
-    )
+    india_hsn: Optional[str] = None
 
     india_hsn_code: Optional[str] = None
 
@@ -147,12 +134,7 @@ class LineItem(BaseModel):
 
     unit_price: Optional[float] = None
 
-    position_price: Optional[float] = Field(
-        default=None,
-        description=(
-            "Complete printed line total for this product."
-        ),
-    )
+    position_price: Optional[float] = None
 
 
 class ProductData(BaseModel):
@@ -162,86 +144,52 @@ class ProductData(BaseModel):
 
 
 class ShipmentData(BaseModel):
-    package_dimensions: Optional[str] = Field(
-        default=None,
-        description=(
-            "Package dimensions as visible in the PDF, "
-            "for example 47x38x7 cm."
-        ),
-    )
+    package_dimensions: Optional[str] = None
 
-    package_weight_kg: Optional[float] = Field(
-        default=None,
-        description=(
-            "Gross/package shipment weight, not product net weight."
-        ),
-    )
+    package_weight_kg: Optional[float] = None
 
-    net_weight_kg: Optional[float] = Field(
-        default=None,
-        description=(
-            "Overall shipment net weight only when explicitly printed."
-        ),
-    )
+    net_weight_kg: Optional[float] = None
 
     total_quantity: Optional[int] = None
+
     total_amount: Optional[float] = None
 
-    currency: Optional[str] = Field(
-        default=None,
-        description="ISO currency such as USD, EUR, GBP or INR.",
-    )
+    currency: Optional[str] = None
 
-    exchange_rate: Optional[float] = Field(
-        default=None,
-        description=(
-            "Exchange rate only if explicitly shown. Never calculate it."
-        ),
-    )
+    exchange_rate: Optional[float] = None
 
-    awb_number: Optional[str] = Field(
-        default=None,
-        description=(
-            "Air Waybill/AWB number only if explicitly shown."
-        ),
-    )
+    awb_number: Optional[str] = None
 
-    shipping_bill_number: Optional[str] = Field(
-        default=None,
-        description=(
-            "Shipping Bill number only if explicitly shown."
-        ),
-    )
+    shipping_bill_number: Optional[str] = None
 
     shipping_bill_date: Optional[str] = None
 
     rodtep_yes_no: Optional[str] = None
 
     rodtep_total_line_items: Optional[int] = None
+
     rodtep_claimed_line_items: Optional[int] = None
 
     freight: Optional[float] = None
+
     insurance: Optional[float] = None
+
     commission: Optional[float] = None
+
     discount: Optional[float] = None
+
     packing_charges: Optional[float] = None
 
     package_count: Optional[int] = None
 
     state_origin: Optional[str] = None
+
     district_origin: Optional[str] = None
 
 
 class CompanyData(BaseModel):
-    iec: Optional[str] = Field(
-        default=None,
-        description="IEC only if explicitly printed.",
-    )
-
-    gstin: Optional[str] = Field(
-        default=None,
-        description="GSTIN only if explicitly printed.",
-    )
+    iec: Optional[str] = None
+    gstin: Optional[str] = None
 
 
 class BankData(BaseModel):
@@ -249,7 +197,7 @@ class BankData(BaseModel):
         default=None,
         description=(
             "Bank AD Code only. "
-            "DO NOT put SWIFT/BIC code in this field."
+            "Never put a SWIFT or BIC code here."
         ),
     )
 
@@ -262,7 +210,7 @@ class BankData(BaseModel):
 
     swift_code: Optional[str] = Field(
         default=None,
-        description="SWIFT/BIC code when present.",
+        description="SWIFT/BIC code when explicitly present.",
     )
 
 
@@ -305,104 +253,75 @@ class ExtractedData(BaseModel):
 
 
 # ============================================================
-# GEMINI EXTRACTION INSTRUCTIONS
+# GEMINI EXTRACTION PROMPT
 # ============================================================
 
 EXTRACTION_PROMPT = """
-You are the document extraction engine for DocPort.
+You are the PDF extraction engine for DocPort.
 
-The attached document is a commercial/export invoice PDF.
+The attached PDF is a commercial/export invoice.
 
-Read the ENTIRE PDF carefully, including:
+Read the ENTIRE PDF carefully before returning data.
 
-- header fields
-- exporter/shipper
-- importer
-- consignee
-- sold-to party
-- product table
-- packaging information
-- totals
-- bank information
-- footer information
+Extract only information that is actually visible in the document.
 
-Return ONLY information matching the supplied structured schema.
+Never invent, infer, assume, calculate or manufacture missing values.
+
+If a field is absent, unclear or uncertain, return null.
+
+Accuracy is more important than filling every field.
 
 
 ============================================================
-GENERAL ACCURACY RULES
+INVOICE
 ============================================================
 
-1. Extract only information actually visible in the PDF.
+Extract:
 
-2. Never invent, infer, assume or manufacture a missing value.
+- commercial invoice number
+- invoice date
+- order date only when explicitly shown
+- purchase order / PO number
 
-3. If a field is absent or unclear, return null.
+Preserve identifiers exactly as printed.
 
-4. Accuracy is more important than filling every field.
-
-5. Read the complete document before producing the result.
-
-6. Preserve identifiers exactly as printed.
-
-Examples:
-
-- invoice numbers
-- PO numbers
-- part numbers
-- HS/HTS codes
-- IEC
-- GSTIN
-- bank account numbers
-- AWB numbers
-- shipping bill numbers
-
-
-============================================================
-DATES
-============================================================
-
-If a date can be confidently identified, normalize it to:
+When a date is clearly identifiable, normalize it to:
 
 DD/MM/YYYY
-
-Never assign one date to another field unless the PDF explicitly
-identifies it for that field.
 
 
 ============================================================
 PARTIES
 ============================================================
 
-Keep these parties separate:
+Keep all parties separate:
 
-- exporter
+- exporter / shipper
 - importer
 - consignee / ship-to
 - sold-to
 
-Do not mix addresses or contacts between them.
+Do not mix their names, addresses, contacts, email addresses or
+phone numbers.
 
-For raw_section, preserve the complete useful visible block.
+For raw_section, preserve the complete useful visible block for
+that party.
 
-For contact:
-return an actual named contact person only.
+For contact, return an actual contact person only.
 
-Do NOT copy a company name into the contact field unless the PDF
-explicitly identifies that value as the contact.
+Do not copy the company name into the contact field unless the
+document explicitly identifies it as the contact.
 
 
 ============================================================
-PRODUCT LINE ITEMS
+PRODUCTS
 ============================================================
 
-Extract EVERY product line in the same order shown in the PDF.
+Extract every visible product line in the same order as the PDF.
 
-Never merge multiple products into one product.
+Do not merge different products.
 
-Never omit a product.
-
-For every product, keep these fields separate:
+For every product extract separately:
 
 - part_number
 - description
@@ -412,35 +331,30 @@ For every product, keep these fields separate:
 - india_hsn
 - country_of_origin
 - quantity
+- currency_symbol
 - unit_price
 - position_price
-- currency_symbol
 
 
-DESCRIPTION RULE:
+DESCRIPTION:
 
-Do not repeat the same filename/product name twice.
+Do not repeat the same product name or filename twice.
 
-For example, if the source effectively says:
+Example:
 
-Ultrasonic_toolchangerplate A.1.stp
-prototype
-
-the description should NOT become:
-
+Wrong:
 Ultrasonic_toolchangerplate A.1.stp, prototype,
 Ultrasonic_toolchangerplate A.1.stp
 
-It should contain the useful description only once.
+Correct:
+Ultrasonic_toolchangerplate A.1.stp, prototype
 
 
-MATERIAL RULE:
+MATERIAL:
 
-Read material grades carefully.
+Preserve material grade numbers exactly.
 
-Preserve punctuation and digits exactly.
-
-For example:
+Example:
 
 3.3211
 
@@ -449,48 +363,40 @@ must not become:
 3.3 211
 
 
-WEIGHT RULE:
+WEIGHT:
 
-product.line_items[].net_weight_kg
-means the individual product line's net weight.
+product.line_items[].net_weight_kg is the net weight of the
+individual product line.
 
-shipment.package_weight_kg
-means package/gross shipment weight.
+shipment.package_weight_kg is the gross/package shipment weight.
 
-Do not confuse them.
+shipment.net_weight_kg is the total shipment net weight only when
+explicitly printed.
+
+Do not confuse these weights.
 
 
-PRICE RULE:
+PRICES:
 
-unit_price
-means price per unit.
+unit_price is price per unit.
 
-position_price
-means the complete line-item amount printed in the invoice.
+position_price is the printed total amount for that product line.
 
-If quantity and unit price are printed but a position total is not
-printed, return null for position_price.
-
-Do not calculate missing financial fields.
+Do not calculate a missing position_price.
 
 
 ============================================================
 SHIPMENT
 ============================================================
 
-package_dimensions should preserve the meaningful visible dimensions.
+Extract when explicitly available:
 
-Example:
-
-47x38x7 cm
-
-package_weight_kg is package/gross weight.
-
-shipment.net_weight_kg is only the overall shipment net weight when
-the PDF explicitly provides one.
-
-Do NOT manufacture:
-
+- package dimensions
+- package/gross weight
+- overall net shipment weight
+- total quantity
+- total amount
+- currency
 - exchange rate
 - AWB number
 - Shipping Bill number
@@ -500,47 +406,50 @@ Do NOT manufacture:
 - commission
 - discount
 - packing charges
+- package count
+- state of origin
+- district of origin
 - RoDTEP information
 
+Never fabricate these fields.
 
-============================================================
-CURRENCY
-============================================================
+If exchange rate is not printed, return null.
 
-currency should use ISO-style values:
+If AWB is not printed, return null.
 
-USD
-EUR
-GBP
-INR
-
-currency_symbol examples:
-
-$
-€
-£
-₹
+If Shipping Bill information is not printed, return null.
 
 
 ============================================================
 BANK INFORMATION
 ============================================================
 
-Be very careful with banking codes.
+Be very careful with bank codes.
 
 bank.code means BANK AD CODE only.
 
 A SWIFT/BIC code must NEVER be placed in bank.code.
 
-Put a SWIFT/BIC code only in:
+Place SWIFT/BIC only in:
 
 bank.swift_code
 
-Put IFSC only in:
+Place IFSC only in:
 
 bank.ifsc
 
-If an AD Code is not explicitly present, bank.code must be null.
+If AD Code is not explicitly identified in the PDF:
+
+bank.code = null
+
+
+============================================================
+COMPANY IDENTIFIERS
+============================================================
+
+Extract IEC and GSTIN only when explicitly printed.
+
+Do not infer them.
 
 
 ============================================================
@@ -549,14 +458,14 @@ EXCEL
 
 Do NOT choose Excel cells.
 
-Do NOT generate Excel formatting.
+Do NOT generate an Excel workbook.
 
-Do NOT redesign the workbook.
+Do NOT change document formatting.
 
-Do NOT modify document wording for presentation purposes.
+Do NOT decide where data belongs in Excel.
 
-DocPort's existing deterministic Excel mapping system will handle
-all workbook placement after extraction.
+DocPort's existing deterministic field_mapping.py and
+excel_generator.py control all Excel placement and formatting.
 """
 
 
@@ -564,19 +473,15 @@ all workbook placement after extraction.
 # GEMINI CLIENT
 # ============================================================
 
+
 def get_gemini_client():
 
-    api_key = os.getenv(
-        "GEMINI_API_KEY"
-    )
+    api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                "GEMINI_API_KEY is not configured."
-            ),
+            detail="GEMINI_API_KEY is not configured.",
         )
 
     return genai.Client(
@@ -585,8 +490,9 @@ def get_gemini_client():
 
 
 # ============================================================
-# MISSING VALUE HELPERS
+# MISSING FIELD HELPERS
 # ============================================================
+
 
 def is_missing(value):
 
@@ -600,7 +506,7 @@ def is_missing(value):
 
 
 def build_missing_fields(
-    data: ExtractedData
+    data: ExtractedData,
 ):
 
     missing = []
@@ -654,10 +560,7 @@ def build_missing_fields(
     for field_name, value in important_fields:
 
         if is_missing(value):
-
-            missing.append(
-                field_name
-            )
+            missing.append(field_name)
 
     for index, item in enumerate(
         data.product.line_items
@@ -718,14 +621,15 @@ def build_missing_fields(
 
 
 # ============================================================
-# TEMPORARY GEMINI ERROR CHECK
+# TEMPORARY GEMINI ERROR DETECTION
 # ============================================================
 
+
 def is_temporary_gemini_error(
-    error: Exception
+    error: Exception,
 ):
 
-    text = str(error).upper()
+    error_text = str(error).upper()
 
     temporary_markers = [
         "429",
@@ -739,28 +643,34 @@ def is_temporary_gemini_error(
         "OVERLOADED",
         "TIMEOUT",
         "DEADLINE_EXCEEDED",
-        "INTERNAL",
     ]
 
     return any(
-        marker in text
+        marker in error_text
         for marker in temporary_markers
     )
 
 
 # ============================================================
-# GEMINI EXTRACTION WITH AUTOMATIC RETRIES
+# GEMINI EXTRACTION WITH RETRIES
 # ============================================================
 
+
 async def extract_with_gemini(
-    pdf_bytes: bytes
+    pdf_bytes: bytes,
 ):
 
     client = get_gemini_client()
 
+    # Uses the model configured in .env.local.
+    #
+    # Your current working .env.local should contain:
+    #
+    # GEMINI_MODEL=gemini-3.8-flash
+    #
     model = os.getenv(
         "GEMINI_MODEL",
-        "gemini-3.5-flash",
+        "gemini-3.8-flash",
     )
 
     pdf_part = types.Part.from_bytes(
@@ -768,15 +678,14 @@ async def extract_with_gemini(
         mime_type="application/pdf",
     )
 
-    # Four total attempts.
+    # First attempt immediately.
     #
-    # Attempt 1: immediately
-    # Attempt 2: after 2 sec
-    # Attempt 3: after 4 sec
-    # Attempt 4: after 8 sec
+    # If Gemini temporarily returns 429/503/etc:
     #
-    # This specifically helps with temporary Gemini
-    # capacity/high-demand/503 problems.
+    # attempt 2 -> wait 2 seconds
+    # attempt 3 -> wait 4 seconds
+    # attempt 4 -> wait 8 seconds
+    #
     retry_delays = [
         0,
         2,
@@ -791,7 +700,7 @@ async def extract_with_gemini(
         start=1,
     ):
 
-        if delay:
+        if delay > 0:
 
             print(
                 (
@@ -800,9 +709,7 @@ async def extract_with_gemini(
                 )
             )
 
-            await asyncio.sleep(
-                delay
-            )
+            await asyncio.sleep(delay)
 
         try:
 
@@ -815,8 +722,6 @@ async def extract_with_gemini(
                 )
             )
 
-            # Run the synchronous Gemini SDK call away
-            # from FastAPI's async event loop.
             response = await asyncio.to_thread(
                 client.models.generate_content,
 
@@ -828,18 +733,13 @@ async def extract_with_gemini(
                 ],
 
                 config=types.GenerateContentConfig(
-                    response_mime_type=(
-                        "application/json"
-                    ),
-
-                    response_schema=(
-                        ExtractedData
-                    ),
+                    response_mime_type="application/json",
+                    response_schema=ExtractedData,
+                    temperature=0,
                 ),
             )
 
             if response is None:
-
                 raise ValueError(
                     "Gemini returned no response."
                 )
@@ -854,7 +754,6 @@ async def extract_with_gemini(
                 parsed,
                 ExtractedData,
             ):
-
                 return parsed
 
             if parsed is not None:
@@ -871,18 +770,12 @@ async def extract_with_gemini(
 
             if response_text:
 
-                return (
-                    ExtractedData
-                    .model_validate_json(
-                        response_text
-                    )
+                return ExtractedData.model_validate_json(
+                    response_text
                 )
 
             raise ValueError(
-                (
-                    "Gemini returned an empty "
-                    "structured response."
-                )
+                "Gemini returned an empty structured response."
             )
 
         except Exception as exc:
@@ -892,7 +785,6 @@ async def extract_with_gemini(
             if not is_temporary_gemini_error(
                 exc
             ):
-
                 raise
 
             print(
@@ -902,6 +794,10 @@ async def extract_with_gemini(
                     f"temporarily: {exc}"
                 )
             )
+
+    print(
+        f"Gemini retries exhausted: {last_error}"
+    )
 
     raise HTTPException(
         status_code=503,
@@ -914,8 +810,9 @@ async def extract_with_gemini(
 
 
 # ============================================================
-# API HEALTH
+# API STATUS
 # ============================================================
+
 
 @app.get("/api")
 def api_home():
@@ -924,13 +821,11 @@ def api_home():
         "service": "DocPort",
         "status": "online",
         "gemini_configured": bool(
-            os.getenv(
-                "GEMINI_API_KEY"
-            )
+            os.getenv("GEMINI_API_KEY")
         ),
         "gemini_model": os.getenv(
             "GEMINI_MODEL",
-            "gemini-3.5-flash",
+            "gemini-3.8-flash",
         ),
     }
 
@@ -942,20 +837,23 @@ def api_health():
         "ok": True,
         "service": "DocPort",
         "gemini_configured": bool(
-            os.getenv(
-                "GEMINI_API_KEY"
-            )
+            os.getenv("GEMINI_API_KEY")
+        ),
+        "gemini_model": os.getenv(
+            "GEMINI_MODEL",
+            "gemini-3.8-flash",
         ),
     }
 
 
 # ============================================================
-# GEMINI PDF EXTRACTION ENDPOINT
+# PDF EXTRACTION
 # ============================================================
+
 
 @app.post("/api/invoices/extract")
 async def extract_invoice(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
 
     filename = (
@@ -964,11 +862,8 @@ async def extract_invoice(
     )
 
     is_pdf = (
-        file.content_type
-        == "application/pdf"
-        or filename.lower().endswith(
-            ".pdf"
-        )
+        file.content_type == "application/pdf"
+        or filename.lower().endswith(".pdf")
     )
 
     if not is_pdf:
@@ -987,12 +882,10 @@ async def extract_invoice(
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                "The uploaded PDF is empty."
-            ),
+            detail="The uploaded PDF is empty.",
         )
 
-    # Safety limit.
+    # 50 MB upload limit.
     if len(pdf_bytes) > (
         50 * 1024 * 1024
     ):
@@ -1012,9 +905,7 @@ async def extract_invoice(
         )
 
         product_count = len(
-            extracted
-            .product
-            .line_items
+            extracted.product.line_items
         )
 
         if product_count == 0:
@@ -1027,8 +918,8 @@ async def extract_invoice(
                 ),
             )
 
-        # Your approved workbook currently has
-        # fixed product-row slots.
+        # Your current approved master workbook has
+        # a fixed number of product rows.
         if product_count > MAX_PRODUCTS:
 
             raise HTTPException(
@@ -1036,8 +927,8 @@ async def extract_invoice(
                 detail=(
                     f"The invoice contains "
                     f"{product_count} products, "
-                    f"but the approved Excel "
-                    f"template supports "
+                    f"but the current approved "
+                    f"Excel template supports "
                     f"{MAX_PRODUCTS} products."
                 ),
             )
@@ -1053,8 +944,8 @@ async def extract_invoice(
                     extracted
                 ),
 
-            # Kept so existing DocPort data
-            # structure remains compatible.
+            # Kept for compatibility with the existing
+            # DocPort frontend/backend data structure.
             "raw_text": "",
         }
 
@@ -1080,26 +971,23 @@ async def extract_invoice(
 
 
 # ============================================================
-# EXISTING APPROVED EXCEL GENERATION
+# EXISTING DOCPORT EXCEL GENERATOR
 #
-# IMPORTANT:
+# Gemini DOES NOT design or generate the workbook.
 #
-# Gemini does NOT generate the workbook.
+# Existing:
 #
-# Gemini only supplies structured invoice values.
+# backend/field_mapping.py
+# backend/excel_generator.py
+# backend/templates/ExportFlow_Master_Template.xlsx
 #
-# Your existing:
-#
-#   field_mapping.py
-#   excel_generator.py
-#   ExportFlow_Master_Template.xlsx
-#
-# continue to control the Excel output.
+# continue to control the exact Excel layout.
 # ============================================================
+
 
 @app.post("/api/documents/generate")
 async def generate_document(
-    payload: dict
+    payload: dict,
 ):
 
     try:
@@ -1113,16 +1001,11 @@ async def generate_document(
         if not output_path.exists():
 
             raise FileNotFoundError(
-                (
-                    "The Excel workbook "
-                    "was not generated."
-                )
+                "The Excel workbook was not generated."
             )
 
         return FileResponse(
-            path=str(
-                output_path
-            ),
+            path=str(output_path),
 
             media_type=(
                 "application/"
@@ -1130,16 +1013,12 @@ async def generate_document(
                 "spreadsheetml.sheet"
             ),
 
-            filename=(
-                output_path.name
-            ),
+            filename=output_path.name,
 
-            background=(
-                BackgroundTask(
-                    lambda:
-                    output_path.unlink(
-                        missing_ok=True
-                    )
+            background=BackgroundTask(
+                lambda:
+                output_path.unlink(
+                    missing_ok=True
                 )
             ),
         )

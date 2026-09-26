@@ -8,7 +8,7 @@ import {
 import HomePage from './components/HomePage'
 import ViewerPage from './components/ViewerPage'
 
-const API_BASE_URL = 'http://127.0.0.1:8000'
+const API_BASE_URL = 'http://127.0.0.1:8001'
 
 export default function App() {
   const [page, setPage] = useState('home')
