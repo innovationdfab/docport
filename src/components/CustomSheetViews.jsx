@@ -9,13 +9,16 @@ import { customViewsHtml } from '../data/customViews.js'
 
 
 // ============================================================
-// HELPERS
+// SMALL HELPERS
 // ============================================================
 
-const isMissing = (value) =>
-  value === null ||
-  value === undefined ||
-  String(value).trim() === ''
+const isMissing = (value) => {
+  return (
+    value === null ||
+    value === undefined ||
+    String(value).trim() === ''
+  )
+}
 
 
 const cleanNumber = (value) => {
@@ -44,12 +47,9 @@ const formatMoney = (
   value,
   symbol = ''
 ) => {
-  const number =
-    numberValue(value)
+  const number = numberValue(value)
 
-  if (number === null) {
-    return ''
-  }
+  if (number === null) return ''
 
   return `${symbol}${number.toFixed(2)}`
 }
@@ -60,54 +60,29 @@ const parseDateParts = (value) => {
     return null
   }
 
-  const text =
-    String(value).trim()
+  const text = String(value).trim()
 
-  let match =
-    text.match(
-      /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/
-    )
+  let match = text.match(
+    /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/
+  )
 
   if (match) {
     return {
-      day:
-        match[1].padStart(
-          2,
-          '0'
-        ),
-
-      month:
-        match[2].padStart(
-          2,
-          '0'
-        ),
-
-      year:
-        match[3],
+      day: match[1].padStart(2, '0'),
+      month: match[2].padStart(2, '0'),
+      year: match[3],
     }
   }
 
-  match =
-    text.match(
-      /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/
-    )
+  match = text.match(
+    /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/
+  )
 
   if (match) {
     return {
-      day:
-        match[3].padStart(
-          2,
-          '0'
-        ),
-
-      month:
-        match[2].padStart(
-          2,
-          '0'
-        ),
-
-      year:
-        match[1],
+      day: match[3].padStart(2, '0'),
+      month: match[2].padStart(2, '0'),
+      year: match[1],
     }
   }
 
@@ -116,8 +91,7 @@ const parseDateParts = (value) => {
 
 
 const slashDate = (value) => {
-  const parts =
-    parseDateParts(value)
+  const parts = parseDateParts(value)
 
   if (!parts) {
     return isMissing(value)
@@ -125,17 +99,12 @@ const slashDate = (value) => {
       : String(value)
   }
 
-  return (
-    `${parts.day}/` +
-    `${parts.month}/` +
-    `${parts.year}`
-  )
+  return `${parts.day}/${parts.month}/${parts.year}`
 }
 
 
 const dashDate = (value) => {
-  const parts =
-    parseDateParts(value)
+  const parts = parseDateParts(value)
 
   if (!parts) {
     return isMissing(value)
@@ -143,11 +112,7 @@ const dashDate = (value) => {
       : String(value)
   }
 
-  return (
-    `${parts.day}-` +
-    `${parts.month}-` +
-    `${parts.year}`
-  )
+  return `${parts.day}-${parts.month}-${parts.year}`
 }
 
 
@@ -216,11 +181,10 @@ const getTotalAmount = (
 
   const values =
     lineItems
-      .map(
-        (item) =>
-          numberValue(
-            item?.position_price
-          )
+      .map((item) =>
+        numberValue(
+          item?.position_price
+        )
       )
       .filter(
         (value) =>
@@ -256,11 +220,10 @@ const getTotalNetWeight = (
 
   const values =
     (lineItems || [])
-      .map(
-        (item) =>
-          numberValue(
-            item?.net_weight_kg
-          )
+      .map((item) =>
+        numberValue(
+          item?.net_weight_kg
+        )
       )
       .filter(
         (value) =>
@@ -279,55 +242,120 @@ const getTotalNetWeight = (
 }
 
 
-const productDescription = (
-  item
-) => {
-  if (!item) {
-    return ''
-  }
+// ============================================================
+// COMPLETE PRODUCT DESCRIPTION
+//
+// Important:
+// Never stop after description.
+// Wherever product description is displayed,
+// show:
+// Part number
+// Description
+// Material
+// ============================================================
 
-  if (
-    !isMissing(
-      item.description
-    )
-  ) {
-    return String(
-      item.description
-    )
-  }
+const productDescription = (item) => {
+  if (!item) return ''
 
   const parts = []
 
-  if (
-    !isMissing(
+  const partNumber =
+    isMissing(
       item.part_number
     )
-  ) {
-    parts.push(
-      `Part #${item.part_number}`
-    )
-  }
+      ? ''
+      : String(
+          item.part_number
+        ).trim()
 
-  if (
-    !isMissing(
+  const description =
+    isMissing(
+      item.description
+    )
+      ? ''
+      : String(
+          item.description
+        ).trim()
+
+  const material =
+    isMissing(
       item.material
     )
+      ? ''
+      : String(
+          item.material
+        ).trim()
+
+
+  // Add part number only if it
+  // is not already inside description.
+  if (
+    partNumber &&
+    !description
+      .toLowerCase()
+      .includes(
+        `part #${partNumber}`
+          .toLowerCase()
+      ) &&
+    !description
+      .toLowerCase()
+      .includes(
+        `part ${partNumber}`
+          .toLowerCase()
+      )
   ) {
     parts.push(
-      `Material: ${item.material}`
+      `Part #${partNumber}`
     )
   }
 
-  return parts.join('\n')
+
+  if (description) {
+    parts.push(
+      description
+    )
+  }
+
+
+  // Add material only if the
+  // description does not already
+  // contain the material line.
+  if (
+    material &&
+    !description
+      .toLowerCase()
+      .includes(
+        'material:'
+      ) &&
+    !description
+      .toLowerCase()
+      .includes(
+        material.toLowerCase()
+      )
+  ) {
+    parts.push(
+      `Material: ${material}`
+    )
+  }
+
+
+  return parts
+    .filter(Boolean)
+    .join('\n')
 }
 
 
 const allProductDescription = (
   lineItems
-) =>
-  (lineItems || [])
+) => {
+  return (
+    lineItems || []
+  )
     .map(
-      (item, index) => {
+      (
+        item,
+        index
+      ) => {
         const description =
           productDescription(
             item
@@ -339,13 +367,14 @@ const allProductDescription = (
 
         return (
           lineItems.length > 1
-            ? `Product ${index + 1}: ${description}`
+            ? `Product ${index + 1}:\n${description}`
             : description
         )
       }
     )
     .filter(Boolean)
-    .join('\n')
+    .join('\n\n')
+}
 
 
 const findRow = (
@@ -398,7 +427,9 @@ const CustomSheetViews =
               typeof forwardedRef ===
               'function'
             ) {
-              forwardedRef(node)
+              forwardedRef(
+                node
+              )
             } else if (
               forwardedRef
             ) {
@@ -414,9 +445,7 @@ const CustomSheetViews =
         const root =
           hostRef.current
 
-        if (!root) {
-          return
-        }
+        if (!root) return
 
 
         const extracted =
@@ -429,21 +458,26 @@ const CustomSheetViews =
           extracted.invoice ||
           {}
 
+
         const consignee =
           extracted.consignee ||
           {}
+
 
         const shipment =
           extracted.shipment ||
           {}
 
+
         const company =
           extracted.company ||
           {}
 
+
         const bank =
           extracted.bank ||
           {}
+
 
         const product =
           extracted.product ||
@@ -558,8 +592,12 @@ const CustomSheetViews =
 
           const shown =
             display
-              ? display(rawValue)
-              : String(rawValue)
+              ? display(
+                  rawValue
+                )
+              : String(
+                  rawValue
+                )
 
 
           element.classList.add(
@@ -570,8 +608,10 @@ const CustomSheetViews =
           element.contentEditable =
             'true'
 
+
           element.spellcheck =
             false
+
 
           element.dataset.dynamic =
             'true'
@@ -580,13 +620,17 @@ const CustomSheetViews =
           element.classList.toggle(
             'missing-cell',
             required &&
-              isMissing(rawValue)
+              isMissing(
+                rawValue
+              )
           )
 
 
           element.title =
             required &&
-            isMissing(rawValue)
+            isMissing(
+              rawValue
+            )
               ? 'Missing value — click here and enter it'
               : 'Click to edit'
 
@@ -610,8 +654,10 @@ const CustomSheetViews =
             const typed =
               element.innerText.trim()
 
+
             element.dataset.pendingValue =
               typed
+
 
             element.classList.toggle(
               'missing-cell',
@@ -631,12 +677,15 @@ const CustomSheetViews =
 
             const finalValue =
               parse
-                ? parse(typed)
+                ? parse(
+                    typed
+                  )
                 : typed
 
 
             element.dataset.editing =
               'false'
+
 
             element.dataset.pendingValue =
               ''
@@ -653,7 +702,8 @@ const CustomSheetViews =
                     finalValue
                   )
                 : String(
-                    finalValue ?? ''
+                    finalValue ??
+                    ''
                   )
 
 
@@ -680,18 +730,19 @@ const CustomSheetViews =
           }
 
 
-          element.onkeydown =
-            (event) => {
-              if (
-                !multiline &&
-                event.key ===
-                  'Enter'
-              ) {
-                event.preventDefault()
+          element.onkeydown = (
+            event
+          ) => {
+            if (
+              !multiline &&
+              event.key ===
+                'Enter'
+            ) {
+              event.preventDefault()
 
-                element.blur()
-              }
+              element.blur()
             }
+          }
         }
 
 
@@ -706,6 +757,7 @@ const CustomSheetViews =
             element,
             {
               ...options,
+
               value,
 
               onSave:
@@ -734,6 +786,7 @@ const CustomSheetViews =
             element,
             {
               ...options,
+
               value,
 
               onSave:
@@ -763,41 +816,6 @@ const CustomSheetViews =
             isMissing(value)
               ? ''
               : String(value)
-        }
-
-
-        const setDerivedValue = (
-          element,
-          value,
-          {
-            missingWhenEmpty =
-              false,
-          } = {}
-        ) => {
-          if (!element) {
-            return
-          }
-
-          element.textContent =
-            isMissing(value)
-              ? ''
-              : String(value)
-
-
-          element.classList.toggle(
-            'missing-cell',
-            missingWhenEmpty &&
-              isMissing(value)
-          )
-
-
-          if (
-            missingWhenEmpty &&
-            isMissing(value)
-          ) {
-            element.title =
-              'Complete the related missing field'
-          }
         }
 
 
@@ -880,7 +898,9 @@ const CustomSheetViews =
             invoiceTable.rows
 
 
+          // --------------------------------------------------
           // CONSIGNEE
+          // --------------------------------------------------
 
           const topRow =
             rows[1]
@@ -956,7 +976,9 @@ const CustomSheetViews =
           }
 
 
+          // --------------------------------------------------
           // INVOICE NUMBER / DATE / PO
+          // --------------------------------------------------
 
           const invoiceInfoTable =
             topRow?.cells?.[2]
@@ -965,9 +987,7 @@ const CustomSheetViews =
               )
 
 
-          if (
-            invoiceInfoTable
-          ) {
+          if (invoiceInfoTable) {
             const infoRows =
               invoiceInfoTable.rows
 
@@ -975,12 +995,9 @@ const CustomSheetViews =
             bindField(
               infoRows?.[0]
                 ?.cells?.[1],
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   (value) =>
@@ -1003,9 +1020,7 @@ const CustomSheetViews =
             bindField(
               infoRows?.[1]
                 ?.cells?.[0],
-
               invoice.number,
-
               'invoice',
               'number'
             )
@@ -1014,12 +1029,9 @@ const CustomSheetViews =
             bindField(
               infoRows?.[2]
                 ?.cells?.[1],
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   (value) =>
@@ -1042,9 +1054,7 @@ const CustomSheetViews =
             bindField(
               infoRows?.[3]
                 ?.cells?.[0],
-
               invoice.po_number,
-
               'invoice',
               'po_number'
             )
@@ -1053,7 +1063,6 @@ const CustomSheetViews =
             setNormalValue(
               infoRows?.[5]
                 ?.cells?.[0],
-
               countryOrigin
             )
 
@@ -1061,13 +1070,14 @@ const CustomSheetViews =
             setNormalValue(
               infoRows?.[7]
                 ?.cells?.[0],
-
               countryOrigin
             )
           }
 
 
+          // --------------------------------------------------
           // EXCHANGE RATE
+          // --------------------------------------------------
 
           const paymentTable =
             rows?.[2]
@@ -1082,12 +1092,9 @@ const CustomSheetViews =
               paymentTable
                 .rows?.[0]
                 ?.cells?.[1],
-
               shipment.exchange_rate,
-
               'shipment',
               'exchange_rate',
-
               {
                 parse:
                   cleanNumber,
@@ -1096,7 +1103,9 @@ const CustomSheetViews =
           }
 
 
+          // --------------------------------------------------
           // CARRIER
+          // --------------------------------------------------
 
           const carriageTable =
             rows?.[3]
@@ -1111,14 +1120,15 @@ const CustomSheetViews =
               carriageTable
                 .rows?.[3]
                 ?.cells?.[0],
-
               invoice.carrier ||
                 'DHL'
             )
           }
 
 
+          // --------------------------------------------------
           // LINE ITEMS
+          // --------------------------------------------------
 
           const lineTable =
             root.querySelector(
@@ -1128,7 +1138,8 @@ const CustomSheetViews =
 
           if (lineTable) {
             while (
-              lineTable.rows.length >
+              lineTable.rows
+                .length >
               1
             ) {
               lineTable.deleteRow(
@@ -1138,7 +1149,10 @@ const CustomSheetViews =
 
 
             lineItems.forEach(
-              (item, index) => {
+              (
+                item,
+                index
+              ) => {
                 const row =
                   lineTable.insertRow()
 
@@ -1170,6 +1184,7 @@ const CustomSheetViews =
                     'center'
                   ),
                   item.india_hsn ||
+                    item.india_hsn_code ||
                     '76169990'
                 )
 
@@ -1191,18 +1206,20 @@ const CustomSheetViews =
                 descCell.style.whiteSpace =
                   'pre-line'
 
+                descCell.style.overflowWrap =
+                  'anywhere'
+
+                descCell.style.height =
+                  'auto'
+
 
                 bindLineField(
                   descCell,
-
                   productDescription(
                     item
                   ),
-
                   index,
-
                   'description',
-
                   {
                     multiline:
                       true,
@@ -1226,16 +1243,14 @@ const CustomSheetViews =
 
                 bindLineField(
                   unitPriceCell,
-
                   item.unit_price,
-
                   index,
-
                   'unit_price',
-
                   {
                     display:
-                      (value) =>
+                      (
+                        value
+                      ) =>
                         formatMoney(
                           value,
                           item.currency_symbol ||
@@ -1256,16 +1271,14 @@ const CustomSheetViews =
 
                 bindLineField(
                   taxableCell,
-
                   item.position_price,
-
                   index,
-
                   'position_price',
-
                   {
                     display:
-                      (value) =>
+                      (
+                        value
+                      ) =>
                         formatMoney(
                           value
                         ),
@@ -1295,7 +1308,9 @@ const CustomSheetViews =
           }
 
 
+          // --------------------------------------------------
           // TOTALS / BANK / PACKING
+          // --------------------------------------------------
 
           const totalsRow =
             rows?.[5]
@@ -1303,41 +1318,44 @@ const CustomSheetViews =
 
           if (totalsRow) {
             const amountTable =
-              totalsRow.cells?.[0]
+              totalsRow
+                .cells?.[0]
                 ?.querySelector(
                   '.mini'
                 )
 
 
             const packingTable =
-              totalsRow.cells?.[1]
+              totalsRow
+                .cells?.[1]
                 ?.querySelector(
                   '.mini'
                 )
 
 
             const finalTotalTable =
-              totalsRow.cells?.[2]
+              totalsRow
+                .cells?.[2]
                 ?.querySelector(
                   '.mini'
                 )
 
 
             if (amountTable) {
-              setDerivedValue(
+              bindField(
                 amountTable
                   .rows?.[0]
                   ?.cells?.[1],
-
-                amountInr === null
-                  ? ''
-                  : amountInr.toFixed(
-                      2
-                    ),
-
+                !isMissing(
+                  shipment.amount_inr_override
+                )
+                  ? shipment.amount_inr_override
+                  : amountInr,
+                'shipment',
+                'amount_inr_override',
                 {
-                  missingWhenEmpty:
-                    true,
+                  parse:
+                    cleanNumber,
                 }
               )
 
@@ -1346,12 +1364,9 @@ const CustomSheetViews =
                 amountTable
                   .rows?.[1]
                   ?.cells?.[1],
-
                 totalAmount,
-
                 'shipment',
                 'total_amount',
-
                 {
                   display:
                     (value) =>
@@ -1374,7 +1389,6 @@ const CustomSheetViews =
                   amountTable
                     .rows?.[2]
                     ?.cells?.[1],
-
                   company.iec
                 )
               }
@@ -1389,7 +1403,6 @@ const CustomSheetViews =
                   amountTable
                     .rows?.[3]
                     ?.cells?.[1],
-
                   company.gstin
                 )
               }
@@ -1404,7 +1417,6 @@ const CustomSheetViews =
                   amountTable
                     .rows?.[4]
                     ?.cells?.[1],
-
                   bank.code
                 )
               }
@@ -1419,7 +1431,6 @@ const CustomSheetViews =
                   amountTable
                     .rows?.[5]
                     ?.cells?.[1],
-
                   bank.account_number
                 )
               }
@@ -1434,9 +1445,7 @@ const CustomSheetViews =
                   ?.querySelector(
                     '.blue-fill'
                   ),
-
                 shipment.package_dimensions,
-
                 'shipment',
                 'package_dimensions'
               )
@@ -1449,12 +1458,9 @@ const CustomSheetViews =
                   ?.querySelector(
                     '.blue-fill'
                   ),
-
                 shipment.package_weight_kg,
-
                 'shipment',
                 'package_weight_kg',
-
                 {
                   display:
                     (value) =>
@@ -1475,12 +1481,9 @@ const CustomSheetViews =
                   ?.querySelector(
                     '.blue-fill'
                   ),
-
                 totalNetWeight,
-
                 'shipment',
                 'net_weight_kg',
-
                 {
                   display:
                     (value) =>
@@ -1502,12 +1505,9 @@ const CustomSheetViews =
                 finalTotalTable
                   .rows?.[0]
                   ?.cells?.[2],
-
                 totalAmount,
-
                 'shipment',
                 'total_amount',
-
                 {
                   display:
                     (value) =>
@@ -1525,12 +1525,9 @@ const CustomSheetViews =
                 finalTotalTable
                   .rows?.[2]
                   ?.cells?.[2],
-
                 totalAmount,
-
                 'shipment',
                 'total_amount',
-
                 {
                   display:
                     (value) =>
@@ -1568,9 +1565,7 @@ const CustomSheetViews =
           bindField(
             invoiceRow
               ?.cells?.[3],
-
             invoice.number,
-
             'invoice',
             'number'
           )
@@ -1586,9 +1581,7 @@ const CustomSheetViews =
           bindField(
             consigneeRow
               ?.cells?.[1],
-
             consigneeName,
-
             'consignee',
             'name'
           )
@@ -1597,12 +1590,9 @@ const CustomSheetViews =
           bindField(
             consigneeRow
               ?.cells?.[3],
-
             invoiceDate,
-
             'invoice',
             'date',
-
             {
               display:
                 dashDate,
@@ -1620,9 +1610,7 @@ const CustomSheetViews =
           bindField(
             awbRow
               ?.cells?.[1],
-
             shipment.awb_number,
-
             'shipment',
             'awb_number'
           )
@@ -1642,31 +1630,37 @@ const CustomSheetViews =
               taxRow.cells[1]
 
 
-            taxCell.innerHTML =
+            const defaultTaxBlock =
               `TAXABLE AMOUNT -${
                 amountInr === null
                   ? ''
                   : amountInr.toFixed(
                       2
                     )
-              }<br/>` +
-              'IGST RATE - 0<br/>' +
-              'IGST AMOUNT - 0<br/>' +
+              }\n` +
+              'IGST RATE - 0\n' +
+              'IGST AMOUNT - 0\n' +
               'GST Compensation Cess - 0'
 
 
-            taxCell.classList.toggle(
-              'missing-cell',
-              amountInr === null
+            taxCell.style.whiteSpace =
+              'pre-line'
+
+
+            bindField(
+              taxCell,
+              !isMissing(
+                shipment.dhl_tax_block_override
+              )
+                ? shipment.dhl_tax_block_override
+                : defaultTaxBlock,
+              'shipment',
+              'dhl_tax_block_override',
+              {
+                multiline:
+                  true,
+              }
             )
-
-
-            if (
-              amountInr === null
-            ) {
-              taxCell.title =
-                'Enter the missing exchange rate'
-            }
           }
 
 
@@ -1680,12 +1674,9 @@ const CustomSheetViews =
           bindField(
             fobRow
               ?.cells?.[2],
-
             totalAmount,
-
             'shipment',
             'total_amount',
-
             {
               display:
                 (value) =>
@@ -1711,12 +1702,9 @@ const CustomSheetViews =
           bindField(
             netRow
               ?.cells?.[2],
-
             totalNetWeight,
-
             'shipment',
             'net_weight_kg',
-
             {
               display:
                 (value) =>
@@ -1740,12 +1728,9 @@ const CustomSheetViews =
           bindField(
             grossRow
               ?.cells?.[2],
-
             shipment.package_weight_kg,
-
             'shipment',
             'package_weight_kg',
-
             {
               display:
                 (value) =>
@@ -1776,23 +1761,20 @@ const CustomSheetViews =
 
 
           bindField(
-            row?.cells?.[1],
-
+            row
+              ?.cells?.[1],
             shipment.shipping_bill_number,
-
             'shipment',
             'shipping_bill_number'
           )
 
 
           bindField(
-            row?.cells?.[3],
-
+            row
+              ?.cells?.[3],
             shippingBillDate,
-
             'shipment',
             'shipping_bill_date',
-
             {
               display:
                 slashDate,
@@ -1807,8 +1789,11 @@ const CustomSheetViews =
           )
 
 
-        if (sdfDeclaration) {
-          sdfDeclaration.replaceChildren()
+        if (
+          sdfDeclaration
+        ) {
+          sdfDeclaration
+            .replaceChildren()
 
 
           sdfDeclaration.append(
@@ -1831,9 +1816,7 @@ const CustomSheetViews =
 
           bindField(
             billSpan,
-
             shipment.shipping_bill_number,
-
             'shipment',
             'shipping_bill_number'
           )
@@ -1859,12 +1842,9 @@ const CustomSheetViews =
 
           bindField(
             dateSpan,
-
             shippingBillDate,
-
             'shipment',
             'shipping_bill_date',
-
             {
               display:
                 slashDate,
@@ -1903,7 +1883,8 @@ const CustomSheetViews =
               ?.cells?.[0]
           ) {
             const cell =
-              shippingRow.cells[0]
+              shippingRow
+                .cells[0]
 
 
             cell.replaceChildren()
@@ -1929,9 +1910,7 @@ const CustomSheetViews =
 
             bindField(
               billSpan,
-
               shipment.shipping_bill_number,
-
               'shipment',
               'shipping_bill_number'
             )
@@ -1957,12 +1936,9 @@ const CustomSheetViews =
 
             bindField(
               dateSpan,
-
               shippingBillDate,
-
               'shipment',
               'shipping_bill_date',
-
               {
                 display:
                   slashDate,
@@ -1985,7 +1961,8 @@ const CustomSheetViews =
 
 
             if (firstCell) {
-              firstCell.replaceChildren()
+              firstCell
+                .replaceChildren()
 
 
               firstCell.append(
@@ -2008,9 +1985,7 @@ const CustomSheetViews =
 
               bindField(
                 numberSpan,
-
                 invoice.number,
-
                 'invoice',
                 'number'
               )
@@ -2036,12 +2011,9 @@ const CustomSheetViews =
 
               bindField(
                 dateSpan,
-
                 invoiceDate,
-
                 'invoice',
                 'date',
-
                 {
                   display:
                     slashDate,
@@ -2053,14 +2025,10 @@ const CustomSheetViews =
             makeDynamicSpan(
               invoiceRow
                 .cells?.[1],
-
               'Date: ',
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   slashDate,
@@ -2110,9 +2078,7 @@ const CustomSheetViews =
 
               bindField(
                 billSpan,
-
                 shipment.shipping_bill_number,
-
                 'shipment',
                 'shipping_bill_number'
               )
@@ -2138,12 +2104,9 @@ const CustomSheetViews =
 
               bindField(
                 dateSpan,
-
                 shippingBillDate,
-
                 'shipment',
                 'shipping_bill_date',
-
                 {
                   display:
                     slashDate,
@@ -2180,14 +2143,10 @@ const CustomSheetViews =
             makeDynamicSpan(
               finalDateRow
                 .cells[0],
-
               'Date: ',
-
               shippingBillDate,
-
               'shipment',
               'shipping_bill_date',
-
               {
                 display:
                   slashDate,
@@ -2218,22 +2177,28 @@ const CustomSheetViews =
             productRow.style.whiteSpace =
               'pre-line'
 
+            productRow.style.overflowWrap =
+              'anywhere'
 
-            setNormalValue(
+            productRow.style.height =
+              'auto'
+
+
+            bindField(
               productRow,
-
-              allProductDescription(
-                lineItems
+              !isMissing(
+                shipment.alum_product_text_override
               )
-            )
-
-
-            productRow.classList.toggle(
-              'missing-cell',
-
-              !allProductDescription(
-                lineItems
-              )
+                ? shipment.alum_product_text_override
+                : allProductDescription(
+                    lineItems
+                  ),
+              'shipment',
+              'alum_product_text_override',
+              {
+                multiline:
+                  true,
+              }
             )
           }
 
@@ -2248,33 +2213,96 @@ const CustomSheetViews =
           if (
             weightRow
               ?.cells?.[0] &&
-
             weightRow.cells[0]
               .classList.contains(
                 'red'
               )
           ) {
             const cell =
-              weightRow.cells[0]
+              weightRow
+                .cells[0]
 
 
-            cell.innerHTML =
-              `3) Full weight of the product&nbsp;&nbsp;${
-                totalNetWeight ??
-                ''
-              }_kg<br/>` +
-              `Aluminum content weight&nbsp;${
-                totalNetWeight ??
-                ''
-              }_kg`
+            cell.replaceChildren()
 
 
-            cell.classList.toggle(
-              'missing-cell',
-
-              totalNetWeight ===
-                null
+            cell.appendChild(
+              document.createTextNode(
+                '3) Full weight of the product  '
+              )
             )
+
+
+            const fullWeightSpan =
+              document.createElement(
+                'span'
+              )
+
+
+            cell.appendChild(
+              fullWeightSpan
+            )
+
+
+            bindField(
+              fullWeightSpan,
+              !isMissing(
+                shipment.full_product_weight_kg
+              )
+                ? shipment.full_product_weight_kg
+                : totalNetWeight,
+              'shipment',
+              'full_product_weight_kg',
+              {
+                parse:
+                  cleanNumber,
+              }
+            )
+
+
+            cell.appendChild(
+              document.createTextNode(
+                ' kg\nAluminum content weight  '
+              )
+            )
+
+
+            const aluminiumWeightSpan =
+              document.createElement(
+                'span'
+              )
+
+
+            cell.appendChild(
+              aluminiumWeightSpan
+            )
+
+
+            bindField(
+              aluminiumWeightSpan,
+              !isMissing(
+                shipment.aluminium_content_weight_kg
+              )
+                ? shipment.aluminium_content_weight_kg
+                : totalNetWeight,
+              'shipment',
+              'aluminium_content_weight_kg',
+              {
+                parse:
+                  cleanNumber,
+              }
+            )
+
+
+            cell.appendChild(
+              document.createTextNode(
+                ' kg'
+              )
+            )
+
+
+            cell.style.whiteSpace =
+              'pre-line'
           }
 
 
@@ -2288,39 +2316,110 @@ const CustomSheetViews =
           if (
             valueRow
               ?.cells?.[0] &&
-
             valueRow.cells[0]
               .classList.contains(
                 'blue'
               )
           ) {
             const cell =
-              valueRow.cells[0]
+              valueRow
+                .cells[0]
 
 
-            cell.innerHTML =
-              `Total Value of the product&nbsp;&nbsp;${
-                totalAmount === null
-                  ? ''
-                  : totalAmount.toFixed(
-                      2
-                    )
-              } usd<br/>` +
-              `Value of the Aluminum content&nbsp;&nbsp;${
-                totalAmount === null
-                  ? ''
-                  : totalAmount.toFixed(
-                      2
-                    )
-              } usd`
+            cell.replaceChildren()
 
 
-            cell.classList.toggle(
-              'missing-cell',
-
-              totalAmount ===
-                null
+            cell.appendChild(
+              document.createTextNode(
+                'Total Value of the product  '
+              )
             )
+
+
+            const totalValueSpan =
+              document.createElement(
+                'span'
+              )
+
+
+            cell.appendChild(
+              totalValueSpan
+            )
+
+
+            bindField(
+              totalValueSpan,
+              totalAmount,
+              'shipment',
+              'total_amount',
+              {
+                display:
+                  (value) =>
+                    formatMoney(
+                      value
+                    ).replace(
+                      /^[$€£₹]/,
+                      ''
+                    ),
+
+                parse:
+                  cleanNumber,
+              }
+            )
+
+
+            cell.appendChild(
+              document.createTextNode(
+                ' usd\nValue of the Aluminum content  '
+              )
+            )
+
+
+            const aluminiumValueSpan =
+              document.createElement(
+                'span'
+              )
+
+
+            cell.appendChild(
+              aluminiumValueSpan
+            )
+
+
+            bindField(
+              aluminiumValueSpan,
+              !isMissing(
+                shipment.aluminium_content_value
+              )
+                ? shipment.aluminium_content_value
+                : totalAmount,
+              'shipment',
+              'aluminium_content_value',
+              {
+                display:
+                  (value) =>
+                    formatMoney(
+                      value
+                    ).replace(
+                      /^[$€£₹]/,
+                      ''
+                    ),
+
+                parse:
+                  cleanNumber,
+              }
+            )
+
+
+            cell.appendChild(
+              document.createTextNode(
+                ' usd'
+              )
+            )
+
+
+            cell.style.whiteSpace =
+              'pre-line'
           }
 
 
@@ -2338,14 +2437,10 @@ const CustomSheetViews =
             makeDynamicSpan(
               completedRow
                 .cells[0],
-
               'Completed by : ',
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   dashDate,
@@ -2398,22 +2493,13 @@ const CustomSheetViews =
 
             bindLineField(
               titleSpan,
-
               firstProduct
-                ?.description ||
-
-                firstProduct
-                  ?.part_number ||
-
-                '',
-
+                ? productDescription(
+                    firstProduct
+                  )
+                : '',
               0,
-
-              firstProduct
-                ?.description
-                ? 'description'
-                : 'part_number',
-
+              'description',
               {
                 multiline:
                   true,
@@ -2449,14 +2535,10 @@ const CustomSheetViews =
             makeDynamicSpan(
               bottomDateRow
                 .cells[0],
-
               'Date          : ',
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   dashDate,
@@ -2488,11 +2570,8 @@ const CustomSheetViews =
             makeDynamicSpan(
               invoiceRow
                 .cells?.[0],
-
               'Invoice No: - ',
-
               invoice.number,
-
               'invoice',
               'number'
             )
@@ -2501,14 +2580,10 @@ const CustomSheetViews =
             makeDynamicSpan(
               invoiceRow
                 .cells?.[1],
-
               'Date: ',
-
               invoiceDate,
-
               'invoice',
               'date',
-
               {
                 display:
                   dashDate,
@@ -2529,11 +2604,18 @@ const CustomSheetViews =
               ?.cells?.[0]
           ) {
             const cell =
-              productRow.cells[0]
+              productRow
+                .cells[0]
 
 
             cell.style.whiteSpace =
               'pre-line'
+
+            cell.style.overflowWrap =
+              'anywhere'
+
+            cell.style.height =
+              'auto'
 
 
             const description =
@@ -2542,19 +2624,23 @@ const CustomSheetViews =
               )
 
 
-            setNormalValue(
+            bindField(
               cell,
-
-              description
-                ? `Product description:- ${description}`
-                : ''
-            )
-
-
-            cell.classList.toggle(
-              'missing-cell',
-
-              !description
+              !isMissing(
+                shipment.scomet_product_text_override
+              )
+                ? shipment.scomet_product_text_override
+                : (
+                    description
+                      ? `Product description:-\n${description}`
+                      : ''
+                  ),
+              'shipment',
+              'scomet_product_text_override',
+              {
+                multiline:
+                  true,
+              }
             )
           }
 
@@ -2576,80 +2662,23 @@ const CustomSheetViews =
                   (item) =>
                     item.hs_code
                 )
-                .filter(Boolean)
-                .join(', ')
+                .filter(
+                  Boolean
+                )
+                .join(
+                  ', '
+                )
 
 
             setNormalValue(
-              hsnRow.cells[0],
-
+              hsnRow
+                .cells[0],
               hsnText
                 ? `HSN code: - ${hsnText}`
                 : 'HSN code: -'
             )
           }
-
-
-          // ==================================================
-          // FORCE COMPLETE END-USE SENTENCE
-          // ==================================================
-
-          const scometRows =
-            Array.from(
-              scometTable.rows ||
-                []
-            )
-
-
-          const endUseRow =
-            scometRows[
-              scometRows.length -
-                1
-            ]
-
-
-          const endUseCell =
-            endUseRow
-              ?.cells?.[0]
-
-
-          if (endUseCell) {
-            endUseCell.textContent =
-              'End Use of the Product: Product is used in automotive sectors which is CNC machined prototype parts used in design and research field for research and development purpose'
-
-
-            endUseCell.style.whiteSpace =
-              'normal'
-
-            endUseCell.style.overflow =
-              'visible'
-
-            endUseCell.style.textOverflow =
-              'clip'
-
-            endUseCell.style.height =
-              'auto'
-
-            endUseCell.style.minHeight =
-              '48px'
-
-            endUseCell.style.lineHeight =
-              '1.45'
-
-            endUseCell.style.wordBreak =
-              'normal'
-
-            endUseCell.style.overflowWrap =
-              'break-word'
-
-
-            if (endUseRow) {
-              endUseRow.style.height =
-                'auto'
-            }
-          }
         }
-
       }, [
         documentData,
         analysisResult,
@@ -2700,15 +2729,18 @@ const CustomSheetViews =
                 padding: 0 3px;
               }
 
-              #fixedScometView .scomet-main tr:last-child td {
-                white-space: normal !important;
-                overflow: visible !important;
-                text-overflow: clip !important;
-                height: auto !important;
-                min-height: 48px !important;
-                line-height: 1.45 !important;
-                overflow-wrap: break-word !important;
-                word-break: normal !important;
+              /*
+               * Allow product descriptions to use
+               * all required lines instead of looking
+               * visually cut off.
+               */
+              .customViewsHost #fixedInvoiceView .line-items td,
+              .customViewsHost #fixedAlumView td.blue.small,
+              .customViewsHost #fixedScometView .blue {
+                white-space: pre-line;
+                overflow-wrap: anywhere;
+                word-break: normal;
+                height: auto;
               }
             `}
           </style>
