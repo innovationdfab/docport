@@ -54,6 +54,7 @@ export default function ViewerPage({
   pdfFile,
   analysisResult,
   documentData,
+  getLatestManualEdits,
   onFieldChange,
   onLineItemChange,
 }) {
@@ -116,6 +117,14 @@ export default function ViewerPage({
 
   const customBaseScaleRef =
     useRef(1)
+
+  const documentDataRef =
+    useRef(documentData)
+
+  useLayoutEffect(() => {
+    documentDataRef.current =
+      documentData
+  }, [documentData])
 
 
   const sheet =
@@ -880,7 +889,90 @@ export default function ViewerPage({
           )
 
 
-          const response =
+         
+          const editingElement =
+            customHostRef.current
+              ?.querySelector(
+                '[data-editing="true"]'
+              )
+
+          if (editingElement) {
+            editingElement.blur()
+          }
+
+          await new Promise(
+            (resolve) => {
+              window.requestAnimationFrame(
+                () => {
+                  window.requestAnimationFrame(
+                    resolve
+                  )
+                }
+              )
+            }
+          )
+
+          const currentDocumentData =
+            documentDataRef.current ||
+            documentData ||
+            {}
+
+          const latestManualEdits =
+            getLatestManualEdits?.() ||
+            {}
+
+          const latestExtracted = {
+            ...(
+              currentDocumentData
+                .extracted ||
+              {}
+            ),
+          }
+
+          Object.entries(
+            latestManualEdits
+          ).forEach(
+            ([
+              section,
+              sectionEdits,
+            ]) => {
+              if (
+                sectionEdits &&
+                typeof sectionEdits ===
+                  'object' &&
+                !Array.isArray(
+                  sectionEdits
+                )
+              ) {
+                latestExtracted[
+                  section
+                ] = {
+                  ...(
+                    latestExtracted[
+                      section
+                    ] ||
+                    {}
+                  ),
+
+                  ...sectionEdits,
+                }
+              } else {
+                latestExtracted[
+                  section
+                ] =
+                  sectionEdits
+              }
+            }
+          )
+
+          const latestDocumentData = {
+            ...currentDocumentData,
+
+            extracted:
+              latestExtracted,
+          }
+
+ const response =
             await fetch(
               `${API_BASE_URL}/api/documents/generate`,
 
@@ -895,7 +987,7 @@ export default function ViewerPage({
 
                 body:
                   JSON.stringify(
-                    documentData
+                    latestDocumentData
                   ),
               }
             )

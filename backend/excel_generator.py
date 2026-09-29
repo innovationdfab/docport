@@ -208,15 +208,13 @@ def get_line_items(data):
 
 def build_product_description(item):
     """
-    Same behavior as website preview.
+    Build the complete reviewed Description of Goods.
 
-    If description exists:
-        show description exactly.
+    Preserve Part #, description and Material together in
+    downloaded Excel, matching the website preview.
 
-    If description is missing:
-        show Part # and Material.
-
-    No raw PDF text is added here.
+    Avoid duplicates when description already contains
+    Part # or Material.
     """
 
     if not item:
@@ -228,21 +226,11 @@ def build_product_description(item):
         )
     )
 
-    if description:
-        return description
-
-    parts = []
-
     part_number = clean(
         item.get(
             "part_number"
         )
     )
-
-    if part_number:
-        parts.append(
-            f"Part #{part_number}"
-        )
 
     material = clean(
         item.get(
@@ -250,10 +238,44 @@ def build_product_description(item):
         )
     )
 
-    if material:
-        parts.append(
-            f"Material: {material}"
+    description_text = (
+        description
+        or ""
+    )
+
+    parts = []
+
+    if part_number:
+        part_exists = re.search(
+            r"Part\s*#\s*"
+            + re.escape(
+                part_number
+            ),
+            description_text,
+            re.IGNORECASE,
         )
+
+        if not part_exists:
+            parts.append(
+                f"Part #{part_number}"
+            )
+
+    if description:
+        parts.append(
+            description
+        )
+
+    if material:
+        material_exists = re.search(
+            r"Material\s*:",
+            description_text,
+            re.IGNORECASE,
+        )
+
+        if not material_exists:
+            parts.append(
+                f"Material: {material}"
+            )
 
     return (
         "\n".join(
@@ -261,7 +283,6 @@ def build_product_description(item):
         ).strip()
         or None
     )
-
 
 def calculate_multi_product_totals(
     line_items
@@ -1290,6 +1311,15 @@ def build_excel_updates(payload):
         + "IGST AMOUNT - 0"
         + "\n"
         + "GST Compensation Cess - 0"
+    )
+
+    taxable_text = (
+        clean(
+            shipment.get(
+                "dhl_tax_block_override"
+            )
+        )
+        or taxable_text
     )
 
     dhl_updates = {

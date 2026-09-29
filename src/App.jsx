@@ -16,7 +16,55 @@ export default function App() {
   const [analyzed, setAnalyzed] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
 
-  const [manualEdits, setManualEdits] = useState({})
+  const [
+    manualEdits,
+    setManualEditsState,
+  ] = useState({})
+
+  // Immediate cache of every manual preview edit.
+  // Download Excel reads this without waiting for React render.
+  const manualEditsRef =
+    useRef({})
+
+  const setManualEdits =
+    useCallback(
+      (update) => {
+        const previous =
+          manualEditsRef.current ||
+          {}
+
+        const next =
+          typeof update ===
+          'function'
+            ? update(previous)
+            : update
+
+        const safeNext =
+          next &&
+          typeof next ===
+            'object'
+            ? next
+            : {}
+
+        // Synchronous ? available immediately to Download Excel.
+        manualEditsRef.current =
+          safeNext
+
+        // Existing React preview behavior remains.
+        setManualEditsState(
+          safeNext
+        )
+      },
+      []
+    )
+
+  const getLatestManualEdits =
+    useCallback(
+      () =>
+        manualEditsRef.current ||
+        {},
+      []
+    )
 
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('')
@@ -418,6 +466,10 @@ export default function App() {
           documentData={finalDocumentData}
 
           manualEdits={manualEdits}
+
+          getLatestManualEdits={
+            getLatestManualEdits
+          }
 
           onFieldChange={handleFieldChange}
 
