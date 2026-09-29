@@ -1073,7 +1073,7 @@ export default function ViewerPage({
             type="button"
             onClick={onBack}
           >
-            ← Back
+            Back
           </button>
 
 
@@ -1081,14 +1081,14 @@ export default function ViewerPage({
             <div
               className="fileTitle"
             >
-              {viewerFileName} — Generated
+              {viewerFileName} â€” Generated
             </div>
 
 
             <div
               className="fileSub"
             >
-              All six original sheets • no shortened wording
+              All six original sheets â€¢ no shortened wording
             </div>
           </div>
         </div>
@@ -1116,7 +1116,7 @@ export default function ViewerPage({
             }
             aria-label="Zoom out"
           >
-            − Zoom
+            - Zoom
           </button>
 
 
@@ -1156,7 +1156,7 @@ export default function ViewerPage({
             {
               generatingExcel
                 ? 'Preparing Download...'
-                : '⬇ Download Excel'
+                : 'Download Excel'
             }
           </button>
         </div>

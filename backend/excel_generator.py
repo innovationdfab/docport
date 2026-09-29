@@ -1,6 +1,5 @@
 from pathlib import Path
 from datetime import datetime
-import tempfile
 import posixpath
 import re
 import zipfile
@@ -28,13 +27,8 @@ TEMPLATE_PATH = (
 )
 
 GENERATED_DIR = (
-    Path(tempfile.gettempdir())
-    / "docport-generated"
-)
-
-GENERATED_DIR.mkdir(
-    parents=True,
-    exist_ok=True,
+    BASE_DIR
+    / "generated"
 )
 
 
@@ -53,6 +47,10 @@ REL_NS = (
 )
 
 
+# ============================================================
+# SETTINGS
+# ============================================================
+
 MAX_PRODUCTS = len(
     INVOICE_PRODUCT_ROWS
 )
@@ -68,13 +66,22 @@ def clean(value):
     if value is None:
         return None
 
-    value = str(value).strip()
+    value = str(
+        value
+    ).strip()
 
-    return value if value else None
+    return (
+        value
+        if value
+        else None
+    )
 
 
 def as_float(value):
-    if value is None or value == "":
+    if (
+        value is None
+        or value == ""
+    ):
         return None
 
     try:
@@ -85,7 +92,6 @@ def as_float(value):
             .replace("₹", "")
             .replace("€", "")
             .replace("£", "")
-            .replace("kg", "")
             .strip()
         )
 
@@ -94,12 +100,15 @@ def as_float(value):
 
 
 def as_int(value):
-    number = as_float(value)
+    number = as_float(
+        value
+    )
 
-    if number is None:
-        return None
-
-    return int(number)
+    return (
+        int(number)
+        if number is not None
+        else None
+    )
 
 
 # ============================================================
@@ -110,16 +119,16 @@ def parse_date(value):
     if not value:
         return None
 
-    text = str(value).strip()
+    text = str(
+        value
+    ).strip()
 
-    formats = (
+    for fmt in (
         "%d.%m.%Y",
         "%d/%m/%Y",
         "%d-%m-%Y",
         "%Y-%m-%d",
-    )
-
-    for fmt in formats:
+    ):
         try:
             return datetime.strptime(
                 text,
@@ -127,31 +136,43 @@ def parse_date(value):
             )
 
         except ValueError:
-            continue
+            pass
 
     return None
 
 
 def date_slash(value):
-    parsed = parse_date(value)
+    parsed = parse_date(
+        value
+    )
 
-    if parsed:
-        return parsed.strftime(
+    return (
+        parsed.strftime(
             "%d/%m/%Y"
         )
-
-    return clean(value) or ""
+        if parsed
+        else (
+            clean(value)
+            or ""
+        )
+    )
 
 
 def date_dash(value):
-    parsed = parse_date(value)
+    parsed = parse_date(
+        value
+    )
 
-    if parsed:
-        return parsed.strftime(
+    return (
+        parsed.strftime(
             "%d-%m-%Y"
         )
-
-    return clean(value) or ""
+        if parsed
+        else (
+            clean(value)
+            or ""
+        )
+    )
 
 
 # ============================================================
@@ -159,212 +180,83 @@ def date_dash(value):
 # ============================================================
 
 def get_line_items(data):
-    product = (
-        data.get("product", {})
-        or {}
-    )
-
-    items = product.get(
-        "line_items",
-        [],
-    )
-
-    if not isinstance(
-        items,
-        list,
-    ):
-        return []
-
-    return items
-
-
-def extract_product_blocks_from_pdf(payload):
-    raw_text = (
-        payload.get(
-            "raw_text",
-            "",
+    items = (
+        data
+        .get(
+            "product",
+            {},
         )
-        or ""
-    )
-
-    if not raw_text:
-        return []
-
-    pattern = re.compile(
-        r"Part\s*#\s*"
-        r"([A-Za-z0-9._/\-]+)"
-        r"\s*,?\s*(.*?)"
-        r"(?=\n\s*\d+(?:\.\d+)?\s+"
-        r"\d{6,12}\s+"
-        r"[A-Za-z][A-Za-z\s]*?\s+"
-        r"\d+\s+"
-        r"[$€£₹]?\s*[\d,.]+\s+"
-        r"[$€£₹]?\s*[\d,.]+)",
-        re.IGNORECASE
-        | re.DOTALL,
-    )
-
-    blocks = []
-
-    for match in pattern.finditer(
-        raw_text
-    ):
-        part_number = clean(
-            match.group(1)
-        )
-
-        body = (
-            match.group(2)
-            .strip()
-        )
-
-        material = None
-        description = body
-
-        material_match = re.search(
-            r"Material\s*:\s*(.*)$",
-            body,
-            re.IGNORECASE
-            | re.DOTALL,
-        )
-
-        if material_match:
-            material = re.sub(
-                r"\s*\n\s*",
-                " ",
-                material_match
-                .group(1)
-                .strip(),
-            )
-
-            description = (
-                body[
-                    : material_match.start()
-                ]
-                .strip()
-            )
-
-        description = re.sub(
-            r"\n\s*",
-            "\n",
-            description,
-        ).strip(
-            " ,\n"
-        )
-
-        blocks.append(
-            {
-                "part_number":
-                    part_number,
-
-                "description":
-                    description
-                    or None,
-
-                "material":
-                    clean(material),
-            }
-        )
-
-    return blocks
-
-
-def build_product_description(
-    item,
-    product_block=None,
-):
-    product_block = (
-        product_block
-        or {}
-    )
-
-    part_number = (
-        clean(
-            item.get(
-                "part_number"
-            )
-        )
-        or
-        clean(
-            product_block.get(
-                "part_number"
-            )
+        .get(
+            "line_items",
+            [],
         )
     )
 
-    description = (
-        clean(
-            item.get(
-                "description"
-            )
+    return (
+        items
+        if isinstance(
+            items,
+            list,
         )
-        or
-        clean(
-            product_block.get(
-                "description"
-            )
+        else []
+    )
+
+
+def build_product_description(item):
+    """
+    Same behavior as website preview.
+
+    If description exists:
+        show description exactly.
+
+    If description is missing:
+        show Part # and Material.
+
+    No raw PDF text is added here.
+    """
+
+    if not item:
+        return None
+
+    description = clean(
+        item.get(
+            "description"
         )
     )
 
-    material = (
-        clean(
-            item.get(
-                "material"
-            )
-        )
-        or
-        clean(
-            product_block.get(
-                "material"
-            )
+    if description:
+        return description
+
+    parts = []
+
+    part_number = clean(
+        item.get(
+            "part_number"
         )
     )
-
-    lines = []
 
     if part_number:
-        lines.append(
+        parts.append(
             f"Part #{part_number}"
         )
 
-    if description:
-        lower_description = (
-            description.lower()
+    material = clean(
+        item.get(
+            "material"
         )
-
-        part_text = (
-            f"part #{part_number}"
-            .lower()
-            if part_number
-            else ""
-        )
-
-        if (
-            not part_number
-            or
-            part_text
-            not in lower_description
-        ):
-            lines.append(
-                description
-            )
+    )
 
     if material:
-        if (
-            not description
-            or
-            "material:"
-            not in description.lower()
-        ):
-            lines.append(
-                f"Material: {material}"
-            )
+        parts.append(
+            f"Material: {material}"
+        )
 
-    result = "\n".join(
-        lines
-    ).strip()
-
-    return result or None
+    return (
+        "\n".join(
+            parts
+        ).strip()
+        or None
+    )
 
 
 def calculate_multi_product_totals(
@@ -379,17 +271,14 @@ def calculate_multi_product_totals(
     has_value = False
 
     for item in line_items:
-
-        quantity = as_int(
+        qty = as_int(
             item.get(
                 "quantity"
             )
         )
 
-        if quantity is not None:
-            total_quantity += (
-                quantity
-            )
+        if qty is not None:
+            total_quantity += qty
             has_quantity = True
 
         weight = as_float(
@@ -399,19 +288,16 @@ def calculate_multi_product_totals(
         )
 
         if weight is not None:
-            total_net_weight += (
-                weight
-            )
+            total_net_weight += weight
             has_weight = True
 
-        position_price = as_float(
+        value = as_float(
             item.get(
                 "position_price"
             )
         )
 
-        if position_price is None:
-
+        if value is None:
             unit_price = as_float(
                 item.get(
                     "unit_price"
@@ -419,42 +305,45 @@ def calculate_multi_product_totals(
             )
 
             if (
-                quantity is not None
-                and
-                unit_price is not None
+                qty is not None
+                and unit_price is not None
             ):
-                position_price = (
-                    quantity
+                value = (
+                    qty
                     * unit_price
                 )
 
-        if position_price is not None:
-            total_value += (
-                position_price
-            )
+        if value is not None:
+            total_value += value
             has_value = True
 
     return {
         "quantity":
-            total_quantity
-            if has_quantity
-            else None,
+            (
+                total_quantity
+                if has_quantity
+                else None
+            ),
 
         "net_weight":
-            round(
-                total_net_weight,
-                3,
-            )
-            if has_weight
-            else None,
+            (
+                round(
+                    total_net_weight,
+                    3,
+                )
+                if has_weight
+                else None
+            ),
 
         "total_value":
-            round(
-                total_value,
-                2,
-            )
-            if has_value
-            else None,
+            (
+                round(
+                    total_value,
+                    2,
+                )
+                if has_value
+                else None
+            ),
     }
 
 
@@ -480,58 +369,22 @@ def currency_symbol_for(
         or "USD"
     ).upper()
 
-    symbols = {
+    return {
         "USD": "$",
         "EUR": "€",
         "GBP": "£",
         "INR": "₹",
-    }
-
-    return symbols.get(
+    }.get(
         currency,
         "",
     )
 
 
 # ============================================================
-# SAFE OPTIONAL MAPPING
+# BUILD EXCEL UPDATES
 # ============================================================
 
-def add_optional_mapping(
-    target,
-    mapping,
-    key,
-    value,
-):
-    """
-    Adds a cell only when the key
-    exists inside field_mapping.py.
-
-    This prevents KeyErrors for
-    template versions that do not
-    contain the optional cell.
-    """
-
-    cell = mapping.get(
-        key
-    )
-
-    if not cell:
-        return
-
-    target[
-        cell
-    ] = value
-
-
-# ============================================================
-# BUILD ALL WORKBOOK UPDATES
-# ============================================================
-
-def build_excel_updates(
-    payload
-):
-
+def build_excel_updates(payload):
     data = payload.get(
         "extracted",
         payload,
@@ -577,18 +430,14 @@ def build_excel_updates(
         or {}
     )
 
-
-    # ========================================================
-    # PRODUCTS
-    # ========================================================
-
     line_items = get_line_items(
         data
     )
 
     if not line_items:
         raise ValueError(
-            "No product line items were extracted from the PDF."
+            "No product line items "
+            "were extracted from the PDF."
         )
 
     if (
@@ -596,38 +445,15 @@ def build_excel_updates(
         > MAX_PRODUCTS
     ):
         raise ValueError(
-            f"The PDF contains {len(line_items)} products, "
-            f"but this Excel template supports only "
-            f"{MAX_PRODUCTS} product rows."
+            f"The PDF contains "
+            f"{len(line_items)} products, "
+            f"but the final Excel template "
+            f"supports {MAX_PRODUCTS}. "
+            "No product data was removed."
         )
-
-
-    product_blocks = (
-        extract_product_blocks_from_pdf(
-            payload
-        )
-    )
-
-    blocks_by_part = {}
-
-    for block in (
-        product_blocks
-    ):
-
-        part = clean(
-            block.get(
-                "part_number"
-            )
-        )
-
-        if part:
-            blocks_by_part[
-                part
-            ] = block
-
 
     # ========================================================
-    # INVOICE DETAILS
+    # INVOICE NUMBER
     # ========================================================
 
     invoice_number = clean(
@@ -636,23 +462,69 @@ def build_excel_updates(
         )
     )
 
-    invoice_date = clean(
+    # ========================================================
+    # ONE DYNAMIC DATE FOR ALL 6 SHEETS
+    # ========================================================
+    #
+    # No hardcoded date.
+    #
+    # Every new PDF uses the date extracted from that PDF.
+    #
+    # Priority:
+    # 1. invoice.date
+    # 2. shipment.shipping_bill_date only if invoice.date missing
+    #
+    # This SAME actual date is used in:
+    #
+    # Invoice
+    # DHL
+    # FORM SDF
+    # EVD
+    # AlumSteel
+    # SCOMET
+    #
+    # ========================================================
+
+    extracted_invoice_date = clean(
         invoice.get(
             "date"
         )
     )
 
-    invoice_date_slash = (
-        date_slash(
-            invoice_date
+    extracted_shipping_date = clean(
+        shipment.get(
+            "shipping_bill_date"
         )
     )
 
-    invoice_date_dash = (
-        date_dash(
-            invoice_date
-        )
+    pdf_document_date = (
+        extracted_invoice_date
+        or extracted_shipping_date
     )
+
+    invoice_date_slash = date_slash(
+        pdf_document_date
+    )
+
+    invoice_date_dash = date_dash(
+        pdf_document_date
+    )
+
+    shipping_bill_date = (
+        pdf_document_date
+    )
+
+    shipping_date_slash = date_slash(
+        pdf_document_date
+    )
+
+    shipping_date_dash = date_dash(
+        pdf_document_date
+    )
+
+    # ========================================================
+    # OTHER VALUES
+    # ========================================================
 
     po_number = clean(
         invoice.get(
@@ -660,19 +532,13 @@ def build_excel_updates(
         )
     )
 
-
-    # ========================================================
-    # CONSIGNEE
-    # ========================================================
-
     consignee_name = (
         clean(
             consignee.get(
                 "name"
             )
         )
-        or
-        clean(
+        or clean(
             consignee.get(
                 "contact"
             )
@@ -685,18 +551,12 @@ def build_excel_updates(
                 "raw_section"
             )
         )
-        or
-        clean(
+        or clean(
             consignee.get(
                 "address"
             )
         )
     )
-
-
-    # ========================================================
-    # SHIPMENT
-    # ========================================================
 
     dimensions = clean(
         shipment.get(
@@ -728,37 +588,14 @@ def build_excel_updates(
         )
     )
 
-    shipping_bill_date = (
-        clean(
-            shipment.get(
-                "shipping_bill_date"
-            )
-        )
-        or
-        invoice_date
-    )
-
-    shipping_date_slash = (
-        date_slash(
-            shipping_bill_date
-        )
-    )
-
-
-    # ========================================================
-    # CURRENCY
-    # ========================================================
-
     currency = (
         clean(
             shipment.get(
                 "currency"
             )
         )
-        or
-        "USD"
+        or "USD"
     ).upper()
-
 
     # ========================================================
     # TOTALS
@@ -771,9 +608,9 @@ def build_excel_updates(
     )
 
     total_quantity = (
-        totals.get(
+        totals[
             "quantity"
-        )
+        ]
     )
 
     if total_quantity is None:
@@ -783,7 +620,6 @@ def build_excel_updates(
             )
         )
 
-
     total_net_weight = as_float(
         shipment.get(
             "net_weight_kg"
@@ -792,11 +628,10 @@ def build_excel_updates(
 
     if total_net_weight is None:
         total_net_weight = (
-            totals.get(
+            totals[
                 "net_weight"
-            )
+            ]
         )
-
 
     total_value = as_float(
         shipment.get(
@@ -806,22 +641,16 @@ def build_excel_updates(
 
     if total_value is None:
         total_value = (
-            totals.get(
+            totals[
                 "total_value"
-            )
+            ]
         )
-
-
-    # ========================================================
-    # INR VALUE
-    # ========================================================
 
     amount_inr = None
 
     if (
         total_value is not None
-        and
-        exchange_rate is not None
+        and exchange_rate is not None
     ):
         amount_inr = round(
             total_value
@@ -829,35 +658,13 @@ def build_excel_updates(
             2,
         )
 
-
-    # Website editable override
-    amount_inr_override = (
-        as_float(
-            shipment.get(
-                "amount_inr_override"
-            )
-        )
-    )
-
-    if (
-        amount_inr_override
-        is not None
-    ):
-        amount_inr = (
-            amount_inr_override
-        )
-
-
     # ========================================================
     # COUNTRY OF ORIGIN
     # ========================================================
 
     countries = []
 
-    for item in (
-        line_items
-    ):
-
+    for item in line_items:
         country = clean(
             item.get(
                 "country_of_origin"
@@ -866,9 +673,7 @@ def build_excel_updates(
 
         if (
             country
-            and
-            country
-            not in countries
+            and country not in countries
         ):
             countries.append(
                 country
@@ -879,13 +684,11 @@ def build_excel_updates(
             countries
         )
         if countries
-        else
-        "INDIA"
+        else "INDIA"
     )
 
-
     # ========================================================
-    # PRODUCT DESCRIPTION BLOCKS
+    # PRODUCT DESCRIPTIONS
     # ========================================================
 
     all_product_descriptions = []
@@ -896,39 +699,9 @@ def build_excel_updates(
     ) in enumerate(
         line_items
     ):
-
-        part = clean(
-            item.get(
-                "part_number"
-            )
-        )
-
-        block = (
-            blocks_by_part.get(
-                part
-            )
-            if part
-            else None
-        )
-
-        if (
-            block is None
-            and
-            index
-            < len(
-                product_blocks
-            )
-        ):
-            block = (
-                product_blocks[
-                    index
-                ]
-            )
-
         description = (
             build_product_description(
-                item,
-                block,
+                item
             )
         )
 
@@ -940,7 +713,9 @@ def build_excel_updates(
             > 1
         ):
             all_product_descriptions.append(
-                f"Product {index + 1}: {description}"
+                f"Product "
+                f"{index + 1}: "
+                f"{description}"
             )
 
         else:
@@ -948,14 +723,12 @@ def build_excel_updates(
                 description
             )
 
-
     all_products_text = (
-        "\n\n".join(
+        "\n".join(
             all_product_descriptions
         )
         or None
     )
-
 
     first_item = (
         line_items[0]
@@ -975,58 +748,58 @@ def build_excel_updates(
                 "description"
             )
         )
-        or
-        first_part
-        or
-        ""
+        or first_part
+        or ""
     )
 
-
     updates = {}
-
 
     # ========================================================
     # 1. INVOICE
     # ========================================================
 
-    invoice_map = (
+    invoice_updates = {
         CELLS[
             "invoice"
-        ]
-    )
-
-
-    invoice_updates = {
-
-        invoice_map[
+        ][
             "invoice_date"
         ]:
             (
-                f"Date-{invoice_date_slash}"
+                f"Date-"
+                f"{invoice_date_slash}"
                 if invoice_date_slash
                 else ""
             ),
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "invoice_number"
         ]:
             invoice_number,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "order_date"
         ]:
             (
-                f"Date-{invoice_date_slash}"
+                f"Date-"
+                f"{invoice_date_slash}"
                 if invoice_date_slash
                 else ""
             ),
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "po_number"
         ]:
             po_number,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "consignee_label"
         ]:
             (
@@ -1034,12 +807,16 @@ def build_excel_updates(
                 f"{consignee_name or ''}"
             ),
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "consignee_address"
         ]:
             consignee_raw,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "consignee_contact"
         ]:
             (
@@ -1047,17 +824,23 @@ def build_excel_updates(
                 f"{consignee_name or ''}"
             ),
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "country_origin_1"
         ]:
             country_origin,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "country_origin_2"
         ]:
             country_origin,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "exchange_rate"
         ]:
             {
@@ -1068,7 +851,9 @@ def build_excel_updates(
                     "number",
             },
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "amount_inr"
         ]:
             {
@@ -1079,7 +864,9 @@ def build_excel_updates(
                     "number",
             },
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "amount_usd"
         ]:
             {
@@ -1090,7 +877,9 @@ def build_excel_updates(
                     "number",
             },
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "total_before_tax"
         ]:
             {
@@ -1101,7 +890,9 @@ def build_excel_updates(
                     "number",
             },
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "total_after_tax"
         ]:
             {
@@ -1112,163 +903,214 @@ def build_excel_updates(
                     "number",
             },
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
+            "package_count"
+        ]:
+            {
+                "value":
+                    (
+                        as_int(
+                            shipment.get(
+                                "package_count"
+                            )
+                        )
+                        or 1
+                    ),
+
+                "kind":
+                    "number",
+            },
+
+        CELLS[
+            "invoice"
+        ][
             "dimensions"
         ]:
             dimensions,
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "gross_weight"
         ]:
             (
                 f"{package_weight:g} kg"
-
-                if package_weight
-                is not None
-
+                if package_weight is not None
                 else None
             ),
 
-        invoice_map[
+        CELLS[
+            "invoice"
+        ][
             "net_weight"
         ]:
             (
                 f"{total_net_weight:g} kg"
-
-                if total_net_weight
-                is not None
-
+                if total_net_weight is not None
                 else None
             ),
     }
 
+    # ========================================================
+    # OPTIONAL COMPANY DATA
+    # ========================================================
 
-    # --------------------------------------------------------
-    # OPTIONAL INVOICE FIELDS
-    # --------------------------------------------------------
-
-    add_optional_mapping(
-        invoice_updates,
-        invoice_map,
-        "iec",
-        clean(
+    if (
+        "iec"
+        in CELLS[
+            "invoice"
+        ]
+    ):
+        invoice_updates[
+            CELLS[
+                "invoice"
+            ][
+                "iec"
+            ]
+        ] = clean(
             company.get(
                 "iec"
             )
-        ),
-    )
+        )
 
-    add_optional_mapping(
-        invoice_updates,
-        invoice_map,
-        "gstin",
-        clean(
+    if (
+        "gstin"
+        in CELLS[
+            "invoice"
+        ]
+    ):
+        invoice_updates[
+            CELLS[
+                "invoice"
+            ][
+                "gstin"
+            ]
+        ] = clean(
             company.get(
                 "gstin"
             )
-        ),
-    )
+        )
 
-    add_optional_mapping(
-        invoice_updates,
-        invoice_map,
-        "bank_ad_code",
-        clean(
+    if (
+        "bank_ad_code"
+        in CELLS[
+            "invoice"
+        ]
+    ):
+        invoice_updates[
+            CELLS[
+                "invoice"
+            ][
+                "bank_ad_code"
+            ]
+        ] = clean(
             bank.get(
                 "code"
             )
-        ),
-    )
+        )
 
-    add_optional_mapping(
-        invoice_updates,
-        invoice_map,
-        "bank_account",
-        clean(
+    if (
+        "bank_account"
+        in CELLS[
+            "invoice"
+        ]
+    ):
+        invoice_updates[
+            CELLS[
+                "invoice"
+            ][
+                "bank_account"
+            ]
+        ] = clean(
             bank.get(
                 "account_number"
             )
-        ),
-    )
+        )
 
-    add_optional_mapping(
-        invoice_updates,
-        invoice_map,
-        "bank_ifsc",
-        clean(
+    if (
+        "bank_ifsc"
+        in CELLS[
+            "invoice"
+        ]
+    ):
+        invoice_updates[
+            CELLS[
+                "invoice"
+            ][
+                "bank_ifsc"
+            ]
+        ] = clean(
             bank.get(
                 "ifsc"
             )
-        ),
-    )
-
-
-    # --------------------------------------------------------
-    # OPTIONAL PACKAGE COUNT
-    # --------------------------------------------------------
-
-    package_count_cell = (
-        invoice_map.get(
-            "package_count"
         )
-    )
 
-    if package_count_cell:
-
-        invoice_updates[
-            package_count_cell
-        ] = {
-            "value":
-                (
-                    as_int(
-                        shipment.get(
-                            "package_count"
-                        )
-                    )
-                    or
-                    1
-                ),
-
-            "kind":
-                "number",
-        }
-
-
-    # --------------------------------------------------------
+    # ========================================================
     # CLEAR PRODUCT ROWS
-    # --------------------------------------------------------
+    # ========================================================
 
     for slot in (
         INVOICE_PRODUCT_ROWS
     ):
+        invoice_updates[
+            slot[
+                "sr_no"
+            ]
+        ] = None
 
-        for key in (
-            "sr_no",
-            "india_hsn",
-            "us_hts",
-            "description",
-            "quantity",
-            "unit_price",
-            "taxable_value",
-            "igst_percent",
-            "igst_amount",
-        ):
+        invoice_updates[
+            slot[
+                "india_hsn"
+            ]
+        ] = None
 
-            cell = (
-                slot.get(
-                    key
-                )
-            )
+        invoice_updates[
+            slot[
+                "us_hts"
+            ]
+        ] = None
 
-            if cell:
-                invoice_updates[
-                    cell
-                ] = None
+        invoice_updates[
+            slot[
+                "description"
+            ]
+        ] = None
 
+        invoice_updates[
+            slot[
+                "quantity"
+            ]
+        ] = None
 
-    # --------------------------------------------------------
-    # WRITE PRODUCT ROWS
-    # --------------------------------------------------------
+        invoice_updates[
+            slot[
+                "unit_price"
+            ]
+        ] = None
+
+        invoice_updates[
+            slot[
+                "taxable_value"
+            ]
+        ] = None
+
+        invoice_updates[
+            slot[
+                "igst_percent"
+            ]
+        ] = None
+
+        invoice_updates[
+            slot[
+                "igst_amount"
+            ]
+        ] = None
+
+    # ========================================================
+    # FILL PRODUCT ROWS
+    # ========================================================
 
     for (
         index,
@@ -1276,49 +1118,19 @@ def build_excel_updates(
     ) in enumerate(
         line_items
     ):
-
         slot = (
             INVOICE_PRODUCT_ROWS[
                 index
             ]
         )
 
-        part = clean(
-            item.get(
-                "part_number"
-            )
-        )
-
-        block = (
-            blocks_by_part.get(
-                part
-            )
-            if part
-            else None
-        )
-
-        if (
-            block is None
-            and
-            index
-            < len(
-                product_blocks
-            )
-        ):
-            block = (
-                product_blocks[
-                    index
-                ]
-            )
-
         description = (
             build_product_description(
-                item,
-                block,
+                item
             )
         )
 
-        quantity = as_int(
+        qty = as_int(
             item.get(
                 "quantity"
             )
@@ -1338,17 +1150,14 @@ def build_excel_updates(
 
         if (
             position_price is None
-            and
-            quantity is not None
-            and
-            unit_price is not None
+            and qty is not None
+            and unit_price is not None
         ):
             position_price = round(
-                quantity
+                qty
                 * unit_price,
                 2,
             )
-
 
         india_hsn = (
             clean(
@@ -1356,23 +1165,19 @@ def build_excel_updates(
                     "india_hsn"
                 )
             )
-            or
-            clean(
+            or clean(
                 item.get(
                     "india_hsn_code"
                 )
             )
-            or
-            DEFAULT_INDIA_HSN
+            or DEFAULT_INDIA_HSN
         )
-
 
         us_hts = clean(
             item.get(
                 "hs_code"
             )
         )
-
 
         symbol = (
             currency_symbol_for(
@@ -1381,141 +1186,82 @@ def build_excel_updates(
             )
         )
 
-
-        serial_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "sr_no"
-            )
-        )
+            ]
+        ] = {
+            "value":
+                index + 1,
 
-        if serial_cell:
-            invoice_updates[
-                serial_cell
-            ] = {
-                "value":
-                    index + 1,
+            "kind":
+                "number",
+        }
 
-                "kind":
-                    "number",
-            }
-
-
-        india_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "india_hsn"
-            )
-        )
+            ]
+        ] = india_hsn
 
-        if india_cell:
-            invoice_updates[
-                india_cell
-            ] = india_hsn
-
-
-        hts_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "us_hts"
-            )
-        )
+            ]
+        ] = us_hts
 
-        if hts_cell:
-            invoice_updates[
-                hts_cell
-            ] = us_hts
-
-
-        description_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "description"
-            )
-        )
+            ]
+        ] = description
 
-        if description_cell:
-            invoice_updates[
-                description_cell
-            ] = description
-
-
-        quantity_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "quantity"
-            )
-        )
+            ]
+        ] = {
+            "value":
+                qty,
 
-        if quantity_cell:
-            invoice_updates[
-                quantity_cell
-            ] = {
-                "value":
-                    quantity,
+            "kind":
+                "number",
+        }
 
-                "kind":
-                    "number",
-            }
-
-
-        unit_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "unit_price"
-            )
+            ]
+        ] = (
+            f"{symbol}"
+            f"{unit_price:.2f}"
+            if unit_price is not None
+            else None
         )
 
-        if unit_cell:
-
-            invoice_updates[
-                unit_cell
-            ] = (
-                f"{symbol}{unit_price:.2f}"
-
-                if unit_price
-                is not None
-
-                else None
-            )
-
-
-        taxable_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "taxable_value"
-            )
-        )
+            ]
+        ] = {
+            "value":
+                position_price,
 
-        if taxable_cell:
+            "kind":
+                "number",
+        }
 
-            invoice_updates[
-                taxable_cell
-            ] = {
-                "value":
-                    position_price,
-
-                "kind":
-                    "number",
-            }
-
-
-        igst_percent_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "igst_percent"
-            )
-        )
+            ]
+        ] = "0%"
 
-        if igst_percent_cell:
-            invoice_updates[
-                igst_percent_cell
-            ] = "0%"
-
-
-        igst_amount_cell = (
-            slot.get(
+        invoice_updates[
+            slot[
                 "igst_amount"
-            )
-        )
-
-        if igst_amount_cell:
-            invoice_updates[
-                igst_amount_cell
-            ] = "0"
-
+            ]
+        ] = "0"
 
     updates[
         SHEETS[
@@ -1523,121 +1269,98 @@ def build_excel_updates(
         ]
     ] = invoice_updates
 
-
     # ========================================================
     # 2. DHL EXPRESS SLI
     # ========================================================
 
-    dhl_map = (
-        CELLS[
-            "dhl"
-        ]
-    )
-
-
     taxable_text = (
         "TAXABLE AMOUNT - "
-        +
-        (
+        + (
             f"{amount_inr:.2f}"
-
-            if amount_inr
-            is not None
-
+            if amount_inr is not None
             else ""
         )
-        +
-        "\nIGST RATE - 0"
-        +
-        "\nIGST AMOUNT - 0"
-        +
-        "\nGST Compensation Cess - 0"
+        + "\n"
+        + "IGST RATE - 0"
+        + "\n"
+        + "IGST AMOUNT - 0"
+        + "\n"
+        + "GST Compensation Cess - 0"
     )
-
-
-    dhl_tax_override = clean(
-        shipment.get(
-            "dhl_tax_block_override"
-        )
-    )
-
-    if dhl_tax_override:
-        taxable_text = (
-            dhl_tax_override
-        )
-
 
     dhl_updates = {
-
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "invoice_number"
         ]:
             invoice_number,
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "consignee"
         ]:
             consignee_name,
 
-        dhl_map[
+        # SAME PDF DATE
+        CELLS[
+            "dhl"
+        ][
             "invoice_date"
         ]:
             invoice_date_dash,
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "awb"
         ]:
             awb,
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "tax_block"
         ]:
             taxable_text,
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "fob_value"
         ]:
             (
-                f"{total_value:.2f} {currency}"
-
-                if total_value
-                is not None
-
+                f"{total_value:.2f} "
+                f"{currency}"
+                if total_value is not None
                 else None
             ),
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "net_weight"
         ]:
             (
                 f"{total_net_weight:g} kg"
-
-                if total_net_weight
-                is not None
-
+                if total_net_weight is not None
                 else None
             ),
 
-        dhl_map[
+        CELLS[
+            "dhl"
+        ][
             "gross_weight"
         ]:
             (
                 f"{package_weight:g} kg"
-
-                if package_weight
-                is not None
-
+                if package_weight is not None
                 else None
             ),
     }
 
-
-    # --------------------------------------------------------
-    # OPTIONAL DHL FIELDS
-    # --------------------------------------------------------
-
     extra_sources = {
-
         "rodtep_yes_no":
             shipment.get(
                 "rodtep_yes_no"
@@ -1683,8 +1406,7 @@ def build_excel_updates(
                 shipment.get(
                     "package_count"
                 )
-                or
-                1
+                or 1
             ),
 
         "state_origin":
@@ -1698,14 +1420,12 @@ def build_excel_updates(
             ),
     }
 
-
     for (
         key,
         cell,
     ) in (
         DHL_EXTRA_CELLS.items()
     ):
-
         value = (
             extra_sources.get(
                 key
@@ -1717,84 +1437,66 @@ def build_excel_updates(
                 cell
             ] = value
 
-
     updates[
         SHEETS[
             "dhl"
         ]
     ] = dhl_updates
 
-
     # ========================================================
     # 3. FORM SDF
     # ========================================================
-
-    sdf_map = (
-        CELLS[
-            "sdf"
-        ]
-    )
-
-
-    sdf_updates = {
-
-        sdf_map[
-            "shipping_bill_header"
-        ]:
-            shipping_bill,
-
-        sdf_map[
-            "shipping_bill_declaration"
-        ]:
-            (
-                "We here by declare that we are the "
-                "SELLER / CONSIGNOR of the goods "
-                "in Respect of which this declaration made "
-                "and that particulars given to shipping Bill No: "
-                f"{shipping_bill or ''} "
-                f"Date {shipping_date_slash or ''} "
-                "are true and that :"
-            ),
-    }
-
-
-    # Current field_mapping.py does not
-    # contain sdf.date, so use it only
-    # if a future mapping adds it.
-
-    sdf_date_cell = (
-        sdf_map.get(
-            "date"
-        )
-    )
-
-    if sdf_date_cell:
-        sdf_updates[
-            sdf_date_cell
-        ] = shipping_date_slash
-
 
     updates[
         SHEETS[
             "sdf"
         ]
-    ] = sdf_updates
+    ] = {
+        CELLS[
+            "sdf"
+        ][
+            "shipping_bill_header"
+        ]:
+            shipping_bill,
 
+        # SAME PDF DATE
+        CELLS[
+            "sdf"
+        ][
+            "date"
+        ]:
+            shipping_date_slash,
+
+        CELLS[
+            "sdf"
+        ][
+            "shipping_bill_declaration"
+        ]:
+            (
+                "We here by declare that "
+                "we are the SELLER / CONSIGNOR "
+                "of the goods in Respect of which "
+                "this declaration made and that "
+                "particulars given to shipping Bill No: "
+                f"{shipping_bill or ''} "
+                "Date "
+                f"{shipping_date_slash or ''} "
+                "are true and that :"
+            ),
+    }
 
     # ========================================================
     # 4. EVD
     # ========================================================
 
-    evd_map = (
-        CELLS[
+    updates[
+        SHEETS[
             "evd"
         ]
-    )
-
-
-    evd_updates = {
-
-        evd_map[
+    ] = {
+        CELLS[
+            "evd"
+        ][
             "shipping_bill"
         ]:
             (
@@ -1804,7 +1506,9 @@ def build_excel_updates(
                 f"{shipping_date_slash or ''}"
             ),
 
-        evd_map[
+        CELLS[
+            "evd"
+        ][
             "invoice_details"
         ]:
             (
@@ -1814,7 +1518,21 @@ def build_excel_updates(
                 f"{invoice_date_slash or ''}"
             ),
 
-        evd_map[
+        # RIGHT-SIDE EVD DATE
+        # Uses SAME CURRENT PDF date.
+        CELLS[
+            "evd"
+        ][
+            "invoice_date"
+        ]:
+            (
+                "Date: "
+                f"{invoice_date_slash or ''}"
+            ),
+
+        CELLS[
+            "evd"
+        ][
             "previous_shipping_bill"
         ]:
             (
@@ -1824,185 +1542,90 @@ def build_excel_updates(
                 f"{shipping_date_slash or ''}"
             ),
 
-        evd_map[
+        CELLS[
+            "evd"
+        ][
             "date"
         ]:
             (
                 "Date: "
-                f"{shipping_date_slash or invoice_date_slash}"
+                f"{shipping_date_slash or ''}"
             ),
     }
-
-
-    # Current mapping does not have
-    # evd.invoice_date.
-    # Use it only if available later.
-
-    evd_invoice_date_cell = (
-        evd_map.get(
-            "invoice_date"
-        )
-    )
-
-    if evd_invoice_date_cell:
-
-        evd_updates[
-            evd_invoice_date_cell
-        ] = (
-            "Date: "
-            f"{invoice_date_slash or ''}"
-        )
-
-
-    updates[
-        SHEETS[
-            "evd"
-        ]
-    ] = evd_updates
-
 
     # ========================================================
     # 5. ALUMINIUM / STEEL
     # ========================================================
 
-    alum_map = (
-        CELLS[
-            "alum"
-        ]
-    )
-
-
-    full_product_weight = as_float(
-        shipment.get(
-            "full_product_weight_kg"
-        )
-    )
-
-    if full_product_weight is None:
-        full_product_weight = (
-            total_net_weight
-        )
-
-
-    aluminium_weight = as_float(
-        shipment.get(
-            "aluminium_content_weight_kg"
-        )
-    )
-
-    if aluminium_weight is None:
-        aluminium_weight = (
-            total_net_weight
-        )
-
-
-    aluminium_value = as_float(
-        shipment.get(
-            "aluminium_content_value"
-        )
-    )
-
-    if aluminium_value is None:
-        aluminium_value = (
-            total_value
-        )
-
-
     weight_text = (
-        "3) Full weight of the product "
-        +
         (
-            f"{full_product_weight:g} kg"
-
-            if full_product_weight
-            is not None
-
-            else ""
+            "3) Full weight of the product "
+            f"{total_net_weight:g} kg"
+            "\n"
+            "Aluminum content weight "
+            f"{total_net_weight:g} kg"
         )
-        +
-        "\nAluminum content weight "
-        +
-        (
-            f"{aluminium_weight:g} kg"
-
-            if aluminium_weight
-            is not None
-
-            else ""
+        if total_net_weight is not None
+        else (
+            "3) Full weight of the product"
+            "\n"
+            "Aluminum content weight"
         )
     )
-
 
     value_text = (
-        "Total Value of the product "
-        +
         (
-            f"{total_value:.2f} {currency.lower()}"
-
-            if total_value
-            is not None
-
-            else ""
+            "Total Value of the product "
+            f"{total_value:.2f} "
+            f"{currency.lower()}"
+            "\n"
+            "Value of the Aluminum content "
+            f"{total_value:.2f} "
+            f"{currency.lower()}"
         )
-        +
-        "\nValue of the Aluminum content "
-        +
-        (
-            f"{aluminium_value:.2f} {currency.lower()}"
-
-            if aluminium_value
-            is not None
-
-            else ""
+        if total_value is not None
+        else (
+            "Total Value of the product"
+            "\n"
+            "Value of the Aluminum content"
         )
     )
-
-
-    alum_product_override = clean(
-        shipment.get(
-            "alum_product_text_override"
-        )
-    )
-
-
-    if alum_product_override:
-        alum_product_text = (
-            "Product:- "
-            f"{alum_product_override}"
-        )
-
-    elif all_products_text:
-        alum_product_text = (
-            "Product:- "
-            f"{all_products_text}"
-        )
-
-    else:
-        alum_product_text = None
-
 
     updates[
         SHEETS[
             "alum"
         ]
     ] = {
-
-        alum_map[
+        CELLS[
+            "alum"
+        ][
             "product"
         ]:
-            alum_product_text,
+            (
+                "Product:- "
+                f"{all_products_text}"
+                if all_products_text
+                else None
+            ),
 
-        alum_map[
+        CELLS[
+            "alum"
+        ][
             "weight_block"
         ]:
             weight_text,
 
-        alum_map[
+        CELLS[
+            "alum"
+        ][
             "value_block"
         ]:
             value_text,
 
-        alum_map[
+        # SAME PDF DATE
+        CELLS[
+            "alum"
+        ][
             "completed_date"
         ]:
             (
@@ -2010,18 +1633,22 @@ def build_excel_updates(
                 f"{invoice_date_dash or ''}"
             ),
 
-        alum_map[
+        CELLS[
+            "alum"
+        ][
             "title"
         ]:
             (
-                f"Title       : {first_title}"
-
+                "Title       : "
+                f"{first_title}"
                 if first_title
-
                 else "Title       :"
             ),
 
-        alum_map[
+        # SAME PDF DATE
+        CELLS[
+            "alum"
+        ][
             "date"
         ]:
             (
@@ -2030,69 +1657,37 @@ def build_excel_updates(
             ),
     }
 
-
     # ========================================================
-    # 6. SCOMET DECLARATION
+    # 6. SCOMET
     # ========================================================
-
-    scomet_map = (
-        CELLS[
-            "scomet"
-        ]
-    )
-
-
-    unique_hsn = []
-
-    for item in line_items:
-
-        hsn = clean(
-            item.get(
-                "hs_code"
-            )
-        )
-
-        if (
-            hsn
-            and
-            hsn not in unique_hsn
-        ):
-            unique_hsn.append(
-                hsn
-            )
-
 
     hsn_text = ", ".join(
-        unique_hsn
-    )
+        dict.fromkeys(
+            clean(
+                item.get(
+                    "hs_code"
+                )
+            )
 
+            for item
+            in line_items
 
-    scomet_override = clean(
-        shipment.get(
-            "scomet_product_text_override"
+            if clean(
+                item.get(
+                    "hs_code"
+                )
+            )
         )
     )
-
-
-    if scomet_override:
-        scomet_product = (
-            scomet_override
-        )
-
-    else:
-        scomet_product = (
-            "Product description:- "
-            f"{all_products_text or ''}"
-        )
-
 
     updates[
         SHEETS[
             "scomet"
         ]
     ] = {
-
-        scomet_map[
+        CELLS[
+            "scomet"
+        ][
             "invoice_number"
         ]:
             (
@@ -2100,7 +1695,10 @@ def build_excel_updates(
                 f"{invoice_number or ''}"
             ),
 
-        scomet_map[
+        # SAME PDF DATE
+        CELLS[
+            "scomet"
+        ][
             "invoice_date"
         ]:
             (
@@ -2108,12 +1706,19 @@ def build_excel_updates(
                 f"{invoice_date_dash or ''}"
             ),
 
-        scomet_map[
+        CELLS[
+            "scomet"
+        ][
             "product"
         ]:
-            scomet_product,
+            (
+                "Product description:- "
+                f"{all_products_text or ''}"
+            ),
 
-        scomet_map[
+        CELLS[
+            "scomet"
+        ][
             "hsn_code"
         ]:
             (
@@ -2122,18 +1727,16 @@ def build_excel_updates(
             ),
     }
 
-
     return updates
 
 
 # ============================================================
-# XLSX SHEET PATHS
+# WORKBOOK / SHEET HELPERS
 # ============================================================
 
 def get_sheet_paths(
     zip_file
 ):
-
     workbook_root = (
         ET.fromstring(
             zip_file.read(
@@ -2142,18 +1745,16 @@ def get_sheet_paths(
         )
     )
 
-
     relationships_root = (
         ET.fromstring(
             zip_file.read(
-                "xl/_rels/workbook.xml.rels"
+                "xl/_rels/"
+                "workbook.xml.rels"
             )
         )
     )
 
-
     relationships = {
-
         relationship.attrib.get(
             "Id"
         ):
@@ -2165,25 +1766,21 @@ def get_sheet_paths(
         in relationships_root
     }
 
-
     sheets_node = (
         workbook_root.find(
             f"{{{MAIN_NS}}}sheets"
         )
     )
 
-
     if sheets_node is None:
         raise ValueError(
-            "Unable to read worksheets from master workbook."
+            "Unable to read worksheets "
+            "from master workbook."
         )
-
 
     sheet_paths = {}
 
-
     for sheet in sheets_node:
-
         sheet_name = (
             sheet.attrib[
                 "name"
@@ -2202,17 +1799,15 @@ def get_sheet_paths(
             )
         )
 
-
         if not target:
             raise ValueError(
-                f"Unable to resolve worksheet '{sheet_name}'."
+                "Unable to resolve "
+                f"worksheet '{sheet_name}'."
             )
-
 
         if target.startswith(
             "/"
         ):
-
             sheet_path = (
                 target.lstrip(
                     "/"
@@ -2220,7 +1815,6 @@ def get_sheet_paths(
             )
 
         else:
-
             sheet_path = (
                 posixpath.normpath(
                     posixpath.join(
@@ -2230,35 +1824,34 @@ def get_sheet_paths(
                 )
             )
 
-
         sheet_paths[
             sheet_name
         ] = sheet_path
 
-
     return sheet_paths
 
-
-# ============================================================
-# XLSX CELL PATCHING
-# ============================================================
 
 def make_cell_pattern(
     reference
 ):
-
     return re.compile(
         (
-            r'(<(?:[A-Za-z_][\w.\-]*:)?c\b'
+            r'(<(?:'
+            r'[A-Za-z_]'
+            r'[\w.\-]*:'
+            r')?c\b'
             r'(?=[^>]*\br="'
-            +
-            re.escape(
+            + re.escape(
                 reference
             )
-            +
-            r'")'
+            + r'")'
             r'[^>]*?)'
-            r'(?:/>|>(.*?)</(?:[A-Za-z_][\w.\-]*:)?c>)'
+            r'(?:/>|>'
+            r'(.*?)'
+            r'</(?:'
+            r'[A-Za-z_]'
+            r'[\w.\-]*:'
+            r')?c>)'
         ),
         re.DOTALL,
     )
@@ -2267,7 +1860,6 @@ def make_cell_pattern(
 def remove_type_attribute(
     start_tag
 ):
-
     return re.sub(
         r'\s+t="[^"]*"',
         "",
@@ -2278,7 +1870,6 @@ def remove_type_attribute(
 def escape_excel_text(
     value
 ):
-
     if value is None:
         return ""
 
@@ -2297,29 +1888,36 @@ def escape_excel_text(
 def xml_prefix_from_start_tag(
     start_tag
 ):
-
     match = re.match(
-        r"<(?P<prefix>[A-Za-z_][\w.\-]*:)?c\b",
+        r"<(?P<prefix>"
+        r"[A-Za-z_]"
+        r"[\w.\-]*:"
+        r")?"
+        r"c\b",
         start_tag,
     )
 
-    if not match:
-        return ""
-
     return (
-        match.group(
-            "prefix"
+        (
+            match.group(
+                "prefix"
+            )
+            or ""
         )
-        or ""
+        if match
+        else ""
     )
 
+
+# ============================================================
+# PATCH XLSX CELL
+# ============================================================
 
 def patch_cell(
     xml_text,
     reference,
     change,
 ):
-
     pattern = (
         make_cell_pattern(
             reference
@@ -2332,12 +1930,12 @@ def patch_cell(
         )
     )
 
-
     if not match:
         raise ValueError(
-            f"Cell {reference} was not found in the master workbook."
+            f"Cell {reference} "
+            "was not found in "
+            "the master workbook."
         )
-
 
     start_tag = (
         remove_type_attribute(
@@ -2345,12 +1943,10 @@ def patch_cell(
         )
     )
 
-
     original_inner = (
         match.group(2)
         or ""
     )
-
 
     prefix = (
         xml_prefix_from_start_tag(
@@ -2358,12 +1954,10 @@ def patch_cell(
         )
     )
 
-
     if isinstance(
         change,
         dict,
     ):
-
         value = change.get(
             "value"
         )
@@ -2374,32 +1968,37 @@ def patch_cell(
         )
 
     else:
-
         value = change
         kind = "string"
 
-
     formula_match = re.search(
         (
-            r'(<(?:[A-Za-z_][\w.\-]*:)?f\b[^>]*>'
+            r'(<(?:'
+            r'[A-Za-z_]'
+            r'[\w.\-]*:'
+            r')?f\b'
+            r'[^>]*>'
             r'.*?'
-            r'</(?:[A-Za-z_][\w.\-]*:)?f>'
+            r'</(?:'
+            r'[A-Za-z_]'
+            r'[\w.\-]*:'
+            r')?f>'
             r'|'
-            r'<(?:[A-Za-z_][\w.\-]*:)?f\b[^>]*/>)'
+            r'<(?:'
+            r'[A-Za-z_]'
+            r'[\w.\-]*:'
+            r')?f\b'
+            r'[^>]*/>)'
         ),
         original_inner,
         flags=re.DOTALL,
     )
 
-
     existing_formula = (
         formula_match.group(1)
-
         if formula_match
-
         else None
     )
-
 
     c_close = (
         f"</{prefix}c>"
@@ -2422,28 +2021,24 @@ def patch_cell(
     )
 
     t_open = (
-        f'<{prefix}t xml:space="preserve">'
+        f'<{prefix}t '
+        f'xml:space="preserve">'
     )
 
     t_close = (
         f"</{prefix}t>"
     )
 
-
     # ========================================================
     # NUMBER
     # ========================================================
 
     if kind == "number":
-
         if (
             value is None
-            or
-            value == ""
+            or value == ""
         ):
-
             if existing_formula:
-
                 replacement = (
                     f"{start_tag}>"
                     f"{existing_formula}"
@@ -2451,16 +2046,12 @@ def patch_cell(
                 )
 
             else:
-
                 replacement = (
                     f"{start_tag}/>"
                 )
 
-
         else:
-
             if existing_formula:
-
                 replacement = (
                     f"{start_tag}>"
                     f"{existing_formula}"
@@ -2471,7 +2062,6 @@ def patch_cell(
                 )
 
             else:
-
                 replacement = (
                     f"{start_tag}>"
                     f"{v_open}"
@@ -2480,22 +2070,20 @@ def patch_cell(
                     f"{c_close}"
                 )
 
-
     # ========================================================
-    # TEXT
+    # STRING
     # ========================================================
 
     else:
-
         escaped_value = (
             escape_excel_text(
                 value
             )
         )
 
-
         replacement = (
-            f'{start_tag} t="inlineStr">'
+            f'{start_tag} '
+            f't="inlineStr">'
             f"{is_open}"
             f"{t_open}"
             f"{escaped_value}"
@@ -2504,16 +2092,17 @@ def patch_cell(
             f"{c_close}"
         )
 
-
     return (
         xml_text[
-            : match.start()
+            :
+            match.start()
         ]
         +
         replacement
         +
         xml_text[
-            match.end() :
+            match.end()
+            :
         ]
     )
 
@@ -2522,13 +2111,11 @@ def patch_sheet(
     xml_bytes,
     changes,
 ):
-
     xml_text = (
         xml_bytes.decode(
             "utf-8"
         )
     )
-
 
     for (
         reference,
@@ -2536,7 +2123,6 @@ def patch_sheet(
     ) in (
         changes.items()
     ):
-
         xml_text = (
             patch_cell(
                 xml_text,
@@ -2544,7 +2130,6 @@ def patch_sheet(
                 change,
             )
         )
-
 
     return (
         xml_text.encode(
@@ -2554,95 +2139,84 @@ def patch_sheet(
 
 
 # ============================================================
-# VALIDATION
+# VALIDATE GENERATED XLSX
 # ============================================================
 
 def validate_generated_xlsx(
     path
 ):
-
     try:
-
         with zipfile.ZipFile(
             path,
             "r",
         ) as workbook:
-
             broken_file = (
                 workbook.testzip()
             )
 
-
             if broken_file:
-
                 raise ValueError(
-                    "Generated workbook contains damaged file: "
+                    "Generated workbook "
+                    "contains damaged file: "
                     f"{broken_file}"
                 )
-
 
             for filename in (
                 workbook.namelist()
             ):
-
                 if not (
                     filename.endswith(
                         ".xml"
                     )
-                    or
-                    filename.endswith(
+                    or filename.endswith(
                         ".rels"
                     )
                 ):
                     continue
 
-
                 try:
-
                     ET.fromstring(
                         workbook.read(
                             filename
                         )
                     )
 
-
                 except Exception as exc:
-
                     raise ValueError(
-                        "Generated workbook contains invalid XML "
-                        f"in {filename}: {exc}"
+                        "Generated workbook "
+                        "contains invalid XML "
+                        f"in {filename}: "
+                        f"{exc}"
                     )
 
-
     except zipfile.BadZipFile as exc:
-
         raise ValueError(
-            "Generated file is not a valid XLSX workbook: "
+            "Generated file is not "
+            "a valid XLSX workbook: "
             f"{exc}"
         )
 
 
 # ============================================================
-# FINAL GENERATION
+# GENERATE EXCEL
 # ============================================================
 
 def generate_excel(
     payload
 ):
-
-    if not TEMPLATE_PATH.exists():
-
+    if not (
+        TEMPLATE_PATH.exists()
+    ):
         raise FileNotFoundError(
-            "Master Excel template was not found: "
+            "Master Excel template "
+            "was not found: "
             f"{TEMPLATE_PATH}"
         )
-
 
     GENERATED_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
-
 
     extracted_data = (
         payload.get(
@@ -2650,16 +2224,13 @@ def generate_excel(
         )
     )
 
-
     if not isinstance(
         extracted_data,
         dict,
     ):
-
         extracted_data = (
             payload
         )
-
 
     invoice_number = clean(
         extracted_data
@@ -2672,15 +2243,12 @@ def generate_excel(
         )
     )
 
-
     safe_invoice = re.sub(
         r"[^A-Za-z0-9_-]+",
         "_",
         invoice_number
-        or
-        "export",
+        or "export",
     )
-
 
     output_path = (
         GENERATED_DIR
@@ -2691,19 +2259,16 @@ def generate_excel(
         )
     )
 
-
     updates = (
         build_excel_updates(
             payload
         )
     )
 
-
     with zipfile.ZipFile(
         TEMPLATE_PATH,
         "r",
     ) as source_zip:
-
         sheet_paths = (
             get_sheet_paths(
                 source_zip
@@ -2712,24 +2277,22 @@ def generate_excel(
 
         patched_files = {}
 
-
         for (
             sheet_name,
             changes,
         ) in (
             updates.items()
         ):
-
             if (
                 sheet_name
                 not in sheet_paths
             ):
-
                 raise ValueError(
-                    f"Worksheet '{sheet_name}' "
-                    "was not found inside the master workbook."
+                    "Worksheet "
+                    f"'{sheet_name}' "
+                    "was not found inside "
+                    "the master workbook."
                 )
-
 
             worksheet_path = (
                 sheet_paths[
@@ -2737,64 +2300,63 @@ def generate_excel(
                 ]
             )
 
-
             original_xml = (
                 source_zip.read(
                     worksheet_path
                 )
             )
 
-
-            patched_files[
-                worksheet_path
-            ] = (
+            # IMPORTANT:
+            #
+            # No row insertion or deletion happens here.
+            # The master template already contains the correct
+            # US row / heading / product-row structure.
+            #
+            # We only replace values in existing cells.
+            patched_xml = (
                 patch_sheet(
                     original_xml,
                     changes,
                 )
             )
 
+            patched_files[
+                worksheet_path
+            ] = patched_xml
 
         with zipfile.ZipFile(
             output_path,
             "w",
-            compression=
-                zipfile.ZIP_DEFLATED,
+            compression=(
+                zipfile.ZIP_DEFLATED
+            ),
         ) as output_zip:
-
-
             for zip_info in (
                 source_zip.infolist()
             ):
-
                 file_data = (
                     source_zip.read(
                         zip_info.filename
                     )
                 )
 
-
                 if (
                     zip_info.filename
                     in patched_files
                 ):
-
                     file_data = (
                         patched_files[
                             zip_info.filename
                         ]
                     )
 
-
                 output_zip.writestr(
                     zip_info,
                     file_data,
                 )
 
-
     validate_generated_xlsx(
         output_path
     )
-
 
     return output_path

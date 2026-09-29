@@ -539,19 +539,28 @@ const CustomSheetViews =
           ''
 
 
-        const documentDate =
-          invoice.date ||
-          shipment.shipping_bill_date ||
-          ''
+        // ====================================================
+// ONE DYNAMIC PDF DATE FOR ALL 6 PREVIEW SHEETS
+// ====================================================
+//
+// Priority:
+// 1. Invoice date extracted from CURRENT uploaded PDF
+// 2. Shipping-bill date only if invoice date is missing
+//
+// No fixed/hardcoded date.
+// ====================================================
 
+const documentDate =
+  invoice.date ||
+  shipment.shipping_bill_date ||
+  ''
 
-        const invoiceDate =
-          documentDate
+// Every preview sheet uses this same extracted date.
+const invoiceDate =
+  documentDate
 
-
-        const shippingBillDate =
-          shipment.shipping_bill_date ||
-          documentDate
+const shippingBillDate =
+  documentDate
 
 
         const countryOrigin =

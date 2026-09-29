@@ -27,6 +27,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+
+        # Vite local frontend
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
@@ -424,10 +428,87 @@ async def extract_invoice(
             r"([\d,]+(?:\.\d+)?)\s*$"
         )
 
-        for index, match in enumerate(
+        # =================================================
+        # COMPLETE GOODS DESCRIPTION EXTRACTION
+        # =================================================
+        #
+        # Capture the complete visible Goods description
+        # block from "Part #" up to its numeric product row.
+        #
+        # This preserves:
+        # - part number text
+        # - complete product wording
+        # - filenames / extensions
+        # - prototype wording
+        # - repeated product names
+        # - complete Material text
+        #
+        # The numeric columns themselves are NOT included.
+        # =================================================
+
+        row_matches = list(
             row_pattern.finditer(
                 full_text
             )
+        )
+
+        description_blocks = []
+
+        previous_row_end = 0
+
+        for row_match in row_matches:
+
+            text_before_row = full_text[
+                previous_row_end:
+                row_match.start()
+            ]
+
+            part_matches_in_block = list(
+                re.finditer(
+                    r"Part\s*#\s*[A-Za-z0-9._/\-]+",
+                    text_before_row,
+                    re.IGNORECASE
+                )
+            )
+
+            if part_matches_in_block:
+
+                description = (
+                    text_before_row[
+                        part_matches_in_block[-1].start():
+                    ]
+                    .strip()
+                )
+
+                # Normalize line endings only.
+                # Do not remove actual description wording.
+                description = re.sub(
+                    r"\r\n?",
+                    "\n",
+                    description
+                )
+
+                # Remove empty PDF extraction lines while
+                # keeping every meaningful text line.
+                description = "\n".join(
+                    line.strip()
+                    for line in description.split("\n")
+                    if line.strip()
+                )
+
+            else:
+                description = None
+
+            description_blocks.append(
+                description
+            )
+
+            previous_row_end = (
+                row_match.end()
+            )
+
+        for index, match in enumerate(
+            row_matches
         ):
 
             symbol = (
@@ -457,6 +538,13 @@ async def extract_invoice(
                 "position_price":
                     clean(match.group(8))
             }
+
+            if index < len(description_blocks):
+                item["description"] = (
+                    description_blocks[index]
+                )
+            else:
+                item["description"] = None
 
             if index < len(part_numbers):
                 item["part_number"] = clean(
