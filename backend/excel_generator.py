@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+import os
 import posixpath
 import re
 import zipfile
@@ -27,7 +28,10 @@ TEMPLATE_PATH = (
 )
 
 GENERATED_DIR = (
-    BASE_DIR
+    Path("/tmp")
+    / "docport-generated"
+    if os.environ.get("VERCEL")
+    else BASE_DIR
     / "generated"
 )
 
