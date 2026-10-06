@@ -114,7 +114,13 @@ button{font:inherit}.page{display:none;min-height:100vh}.page.active{display:blo
 #fixedDhlView .tall-3{height:88px}
 #fixedDhlView .section-gap td{border-left:0;border-right:0;height:38px;background:#fff}
 #fixedDhlView .no-border{border:none!important}
-#fixedDhlView .signature{height:52px;vertical-align:bottom}
+#fixedDhlView .signature{
+  height:82px;
+  vertical-align:bottom !important;
+  padding-top:48px !important;
+  padding-bottom:5px !important;
+  box-sizing:border-box;
+}
 #fixedDhlView .section-cell{padding:0!important;border:0!important}
 #fixedDhlView .mini{
   width:100%;
@@ -398,3 +404,327 @@ button{font:inherit}.page{display:none;min-height:100vh}.page.active{display:blo
 }
 
 .customViewsHost{display:contents}
+
+/* DOCport SDF + SCOMET paper-form layout */
+
+/* =========================================================
+   FORM SDF - boxed preview layout
+   ========================================================= */
+
+#fixedSdfView{
+  background:#eef1f4 !important;
+  padding:0 !important;
+  box-sizing:border-box !important;
+}
+
+#fixedSdfView .sdf-sheet-inner{
+  width:100% !important;
+  max-width:none !important;
+  margin:0 !important;
+  background:#ffffff !important;
+  border:none !important;
+  box-sizing:border-box !important;
+  padding:0 !important;
+}
+
+#fixedSdfView .sdf-main{
+  width:100% !important;
+  border-collapse:collapse !important;
+  table-layout:fixed !important;
+  background:#ffffff !important;
+}
+
+#fixedSdfView .sdf-main td{
+  border:1px solid #222 !important;
+  color:#000 !important;
+  background:#ffffff !important;
+  vertical-align:middle !important;
+}
+
+#fixedSdfView .sdf-title{
+  background:#ffd400 !important;
+  color:#000 !important;
+  font-size:26px !important;
+  font-weight:700 !important;
+  text-align:center !important;
+  padding:14px 10px !important;
+  letter-spacing:1px !important;
+}
+
+#fixedSdfView .section-cell{
+  padding:0 !important;
+}
+
+#fixedSdfView .sdf-info{
+  width:100% !important;
+  border-collapse:collapse !important;
+  table-layout:fixed !important;
+}
+
+#fixedSdfView .sdf-info td{
+  border:1px solid #222 !important;
+  padding:10px 12px !important;
+  font-size:18px !important;
+  font-weight:700 !important;
+  background:#ffffff !important;
+}
+
+#fixedSdfView .sdf-info td.blue{
+  background:#31add6 !important;
+  color:#000 !important;
+  text-align:center !important;
+}
+
+#fixedSdfView .sdf-heading{
+  background:#ffffff !important;
+  color:#000 !important;
+  text-align:center !important;
+  font-size:22px !important;
+  font-weight:700 !important;
+  padding:28px 14px !important;
+}
+
+#fixedSdfView .marker{
+  width:7% !important;
+  text-align:center !important;
+  vertical-align:top !important;
+  font-weight:700 !important;
+  font-size:22px !important;
+  padding:28px 8px !important;
+  background:#ffffff !important;
+}
+
+#fixedSdfView .blue-soft{
+  background:#31add6 !important;
+}
+
+#fixedSdfView .marker.blue-soft{
+  background:#31add6 !important;
+}
+
+#fixedSdfView .sdf-text{
+  font-size:18px !important;
+  line-height:1.35 !important;
+  padding:22px 24px !important;
+  vertical-align:top !important;
+  background:#ffffff !important;
+}
+
+#fixedSdfView .blue-soft.sdf-text{
+  background:#31add6 !important;
+}
+
+#fixedSdfView .sdf-main > tbody > tr:nth-of-type(5) .sdf-text{
+  padding-top:28px !important;
+  padding-bottom:28px !important;
+}
+
+#fixedSdfView .sdf-main > tbody > tr:nth-of-type(6) .sdf-text{
+  padding-top:28px !important;
+  padding-bottom:28px !important;
+}
+
+#fixedSdfView .sdf-main > tbody > tr:nth-of-type(7) .sdf-text{
+  padding:34px 20% 34px 20% !important;
+  text-align:left !important;
+}
+
+#fixedSdfView .sdf-main > tbody > tr:nth-of-type(8) .sdf-text{
+  padding:18px 20px !important;
+}
+
+/* =========================================================
+   SCOMET - boxed preview layout
+   ========================================================= */
+
+#fixedScometView{
+  background:#eef1f4 !important;
+  padding:0 !important;
+  box-sizing:border-box !important;
+}
+
+#fixedScometView .scomet-sheet-inner{
+  width:100% !important;
+  max-width:none !important;
+  margin:0 !important;
+  background:#ffffff !important;
+  border:none !important;
+  box-sizing:border-box !important;
+  padding:0 !important;
+}
+
+#fixedScometView .scomet-main{
+  width:100% !important;
+  border-collapse:collapse !important;
+  table-layout:fixed !important;
+  background:#ffffff !important;
+}
+
+#fixedScometView .scomet-main td{
+  border:1px solid #222 !important;
+  background:#ffffff !important;
+  color:#000 !important;
+  font-size:18px !important;
+  line-height:1.35 !important;
+  vertical-align:top !important;
+}
+
+#fixedScometView .title-main{
+  background:#ffd400 !important;
+  color:#000 !important;
+  font-size:30px !important;
+  font-weight:700 !important;
+  letter-spacing:10px !important;
+  text-align:center !important;
+  padding:12px 10px !important;
+}
+
+#fixedScometView .title-sub{
+  background:#ffffff !important;
+  color:#000 !important;
+  font-size:22px !important;
+  font-weight:700 !important;
+  text-align:center !important;
+  padding:10px 10px !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(3) td{
+  padding:14px 14px !important;
+  background:#ffffff !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(4) td{
+  background:#31add6 !important;
+  padding:10px 14px !important;
+  font-size:18px !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(4) td.right{
+  text-align:right !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(5) td{
+  background:#31add6 !important;
+  padding:12px 14px !important;
+  white-space:pre-line !important;
+  overflow-wrap:anywhere !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(6) td{
+  padding:12px 14px !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(7) td{
+  padding:14px 14px !important;
+}
+
+#fixedScometView .para{
+  padding:14px 14px !important;
+  background:#ffffff !important;
+  color:#000 !important;
+  font-size:18px !important;
+  line-height:1.35 !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(12) td{
+  padding:14px 14px !important;
+  font-weight:700 !important;
+}
+
+#fixedScometView .scomet-main > tbody > tr:nth-of-type(13) td{
+  padding:14px 14px !important;
+}
+
+@media (max-width: 900px){
+  #fixedSdfView .sdf-title,
+  #fixedScometView .title-main{
+    font-size:22px !important;
+  }
+
+  #fixedSdfView .sdf-heading,
+  #fixedScometView .title-sub{
+    font-size:18px !important;
+  }
+
+  #fixedSdfView .sdf-text,
+  #fixedScometView .para,
+  #fixedScometView .scomet-main td{
+    font-size:16px !important;
+  }
+}
+
+/* DOCport centered boxed form correction */
+
+/* Keep FORM SDF as a centered paper/form */
+#fixedSdfView{
+  background:#eef1f4 !important;
+  padding:18px 20px 28px !important;
+  box-sizing:border-box !important;
+}
+
+#fixedSdfView .sdf-sheet-inner{
+  width:94% !important;
+  max-width:1080px !important;
+  margin:0 auto !important;
+  background:#ffffff !important;
+  border:1.5px solid #333 !important;
+  box-sizing:border-box !important;
+  padding:0 !important;
+}
+
+/* Keep SCOMET as a centered paper/form */
+#fixedScometView{
+  background:#eef1f4 !important;
+  padding:18px 20px 28px !important;
+  box-sizing:border-box !important;
+}
+
+#fixedScometView .scomet-sheet-inner{
+  width:94% !important;
+  max-width:1080px !important;
+  margin:0 auto !important;
+  background:#ffffff !important;
+  border:1.5px solid #333 !important;
+  box-sizing:border-box !important;
+  padding:0 !important;
+}
+
+@media (max-width:900px){
+  #fixedSdfView .sdf-sheet-inner,
+  #fixedScometView .scomet-sheet-inner{
+    width:100% !important;
+  }
+}
+
+/* SDF undertaking sentence full-width correction */
+#fixedSdfView .sdf-main > tbody > tr:nth-of-type(7) .sdf-text{
+  padding:14px 14px !important;
+  margin:0 !important;
+  width:auto !important;
+  max-width:none !important;
+  text-align:left !important;
+  white-space:normal !important;
+  line-height:1.35 !important;
+}
+
+/* SDF + SCOMET yellow heading correction */
+
+#fixedSdfView .sdf-title{
+  background:#ffd400 !important;
+}
+
+#fixedScometView .title-main{
+  background:#ffd400 !important;
+}
+
+/* DOCport uppercase all page top headings */
+
+#fixedInvoiceView .inv-title,
+#fixedSdfView .sdf-title,
+#fixedEvdView .title-main,
+#fixedAlumView .title-sub,
+#fixedScometView .title-main,
+#fixedDhlView table:first-of-type > tbody > tr:first-child > td,
+#fixedDhlView table:first-of-type > tbody > tr:first-child > th {
+  text-transform: uppercase !important;
+}

@@ -55,7 +55,14 @@ REL_NS = (
 # SETTINGS
 # ============================================================
 
-MAX_PRODUCTS = len(
+# The master workbook starts with three formatted product rows
+# (27-29). When an invoice contains more products, additional
+# rows are inserted dynamically before row 30 using row 29 as
+# the formatting template. There is intentionally no fixed
+# application-level product-count limit.
+INVOICE_PRODUCT_START_ROW = 27
+INVOICE_STATIC_START_ROW = 30
+INVOICE_TEMPLATE_PRODUCT_ROW_COUNT = len(
     INVOICE_PRODUCT_ROWS
 )
 
@@ -406,6 +413,363 @@ def currency_symbol_for(
 
 
 # ============================================================
+# DYNAMIC INVOICE PRODUCT ROW HELPERS
+# ============================================================
+
+def invoice_product_slot(index):
+    """Return the Invoice-sheet cell map for any product index."""
+    row = (
+        INVOICE_PRODUCT_START_ROW
+        + index
+    )
+
+    return {
+        "sr_no": f"A{row}",
+        "india_hsn": f"B{row}",
+        "us_hts": f"C{row}",
+        "description": f"D{row}",
+        "quantity": f"I{row}",
+        "unit_price": f"J{row}",
+        "taxable_value": f"K{row}",
+        "igst_percent": f"M{row}",
+        "igst_amount": f"N{row}",
+    }
+
+
+def shift_cell_reference(
+    reference,
+    start_row,
+    row_delta,
+):
+    """Shift a simple A1 reference when rows are inserted above it."""
+    if (
+        not row_delta
+        or not reference
+    ):
+        return reference
+
+    match = re.fullmatch(
+        r"([A-Z]+)(\d+)",
+        str(reference),
+    )
+
+    if not match:
+        return reference
+
+    column = match.group(1)
+    row = int(
+        match.group(2)
+    )
+
+    if row >= start_row:
+        row += row_delta
+
+    return f"{column}{row}"
+
+
+def shift_a1_range_text(
+    value,
+    start_row,
+    row_delta,
+):
+    """Shift row numbers inside an A1 reference/range string."""
+    if (
+        not row_delta
+        or not value
+    ):
+        return value
+
+    pattern = re.compile(
+        r"(\$?[A-Z]{1,3})(\$?)(\d+)"
+    )
+
+    def replace(match):
+        column = match.group(1)
+        absolute_row = match.group(2)
+        row = int(
+            match.group(3)
+        )
+
+        if row >= start_row:
+            row += row_delta
+
+        return (
+            f"{column}"
+            f"{absolute_row}"
+            f"{row}"
+        )
+
+    return pattern.sub(
+        replace,
+        str(value),
+    )
+
+
+def _move_invoice_row_xml(
+    row_xml,
+    source_row,
+    target_row,
+):
+    """Move one raw worksheet row while preserving every style/cell."""
+    def replace(match):
+        prefix = match.group(1)
+        column = match.group(2)
+        row = int(
+            match.group(3)
+        )
+        suffix = match.group(4)
+
+        if row == source_row:
+            row = target_row
+
+        return (
+            f"{prefix}"
+            f"{column}"
+            f"{row}"
+            f"{suffix}"
+        )
+
+    return re.sub(
+        r'(\br=")([A-Z]*)(\d+)(")',
+        replace,
+        row_xml,
+    )
+
+
+def _shift_invoice_row_xml(
+    row_xml,
+    start_row,
+    row_delta,
+):
+    """Shift an existing worksheet row and all of its cell references."""
+    row_match = re.search(
+        r'<(?:[A-Za-z_][\w.\-]*:)?row\b[^>]*\br="(\d+)"',
+        row_xml,
+    )
+
+    if not row_match:
+        return row_xml
+
+    source_row = int(
+        row_match.group(1)
+    )
+
+    if source_row < start_row:
+        return row_xml
+
+    return _move_invoice_row_xml(
+        row_xml,
+        source_row,
+        source_row + row_delta,
+    )
+
+
+def _shift_reference_attributes(
+    xml_fragment,
+    start_row,
+    row_delta,
+):
+    """Shift ref/sqref attributes outside sheetData after row insertion."""
+    if not row_delta:
+        return xml_fragment
+
+    def replace(match):
+        return (
+            match.group(1)
+            + shift_a1_range_text(
+                match.group(2),
+                start_row,
+                row_delta,
+            )
+            + match.group(3)
+        )
+
+    return re.sub(
+        r'(\b(?:ref|sqref)=")([^"]+)(")',
+        replace,
+        xml_fragment,
+    )
+
+
+def expand_invoice_product_rows(
+    xml_bytes,
+    extra_rows,
+):
+    """
+    Insert extra formatted product rows into the Invoice worksheet.
+
+    The existing template has product rows 27-29. For every product
+    beyond the third, clone row 29, insert it immediately after the
+    existing product block, then shift all original rows/references
+    from row 30 downward. This preserves all unrelated workbook XML.
+    """
+    if extra_rows <= 0:
+        return xml_bytes
+
+    xml_text = xml_bytes.decode(
+        "utf-8"
+    )
+
+    sheet_data_match = re.search(
+        r'(<(?:[A-Za-z_][\w.\-]*:)?sheetData>)(.*?)(</(?:[A-Za-z_][\w.\-]*:)?sheetData>)',
+        xml_text,
+        re.DOTALL,
+    )
+
+    if not sheet_data_match:
+        raise ValueError(
+            "Invoice worksheet sheetData was not found."
+        )
+
+    before_sheet_data = xml_text[
+        :sheet_data_match.start()
+    ]
+    sheet_data_open = sheet_data_match.group(1)
+    sheet_data_body = sheet_data_match.group(2)
+    sheet_data_close = sheet_data_match.group(3)
+    after_sheet_data = xml_text[
+        sheet_data_match.end():
+    ]
+
+    template_row_match = re.search(
+        r'<(?:[A-Za-z_][\w.\-]*:)?row\b[^>]*\br="29"[^>]*>.*?</(?:[A-Za-z_][\w.\-]*:)?row>',
+        sheet_data_body,
+        re.DOTALL,
+    )
+
+    if not template_row_match:
+        raise ValueError(
+            "Invoice product template row 29 was not found."
+        )
+
+    template_row_xml = (
+        template_row_match.group(0)
+    )
+
+    row_pattern = re.compile(
+        r'<(?:[A-Za-z_][\w.\-]*:)?row\b[^>]*>.*?</(?:[A-Za-z_][\w.\-]*:)?row>',
+        re.DOTALL,
+    )
+
+    shifted_body = row_pattern.sub(
+        lambda match: _shift_invoice_row_xml(
+            match.group(0),
+            INVOICE_STATIC_START_ROW,
+            extra_rows,
+        ),
+        sheet_data_body,
+    )
+
+    extra_row_xml = "".join(
+        _move_invoice_row_xml(
+            template_row_xml,
+            29,
+            INVOICE_STATIC_START_ROW
+            + offset,
+        )
+        for offset in range(
+            extra_rows
+        )
+    )
+
+    row_29_match = re.search(
+        r'<(?:[A-Za-z_][\w.\-]*:)?row\b[^>]*\br="29"[^>]*>.*?</(?:[A-Za-z_][\w.\-]*:)?row>',
+        shifted_body,
+        re.DOTALL,
+    )
+
+    if not row_29_match:
+        raise ValueError(
+            "Invoice product row 29 disappeared during expansion."
+        )
+
+    shifted_body = (
+        shifted_body[:row_29_match.end()]
+        + extra_row_xml
+        + shifted_body[row_29_match.end():]
+    )
+
+    before_sheet_data = (
+        _shift_reference_attributes(
+            before_sheet_data,
+            INVOICE_STATIC_START_ROW,
+            extra_rows,
+        )
+    )
+
+    after_sheet_data = (
+        _shift_reference_attributes(
+            after_sheet_data,
+            INVOICE_STATIC_START_ROW,
+            extra_rows,
+        )
+    )
+
+    # Every product row has the same three merged regions as row 29.
+    product_merge_columns = (
+        ("D", "H"),
+        ("K", "L"),
+        ("N", "O"),
+    )
+
+    new_merge_tags = "".join(
+        f'<mergeCell ref="{start}{row}:{end}{row}"/>'
+        for row in range(
+            INVOICE_STATIC_START_ROW,
+            INVOICE_STATIC_START_ROW
+            + extra_rows,
+        )
+        for start, end in product_merge_columns
+    )
+
+    merge_cells_match = re.search(
+        r'(<(?:[A-Za-z_][\w.\-]*:)?mergeCells\b[^>]*\bcount=")(\d+)("[^>]*>)(.*?)(</(?:[A-Za-z_][\w.\-]*:)?mergeCells>)',
+        after_sheet_data,
+        re.DOTALL,
+    )
+
+    if not merge_cells_match:
+        raise ValueError(
+            "Invoice worksheet mergeCells block was not found."
+        )
+
+    merge_count = (
+        int(merge_cells_match.group(2))
+        + (
+            len(product_merge_columns)
+            * extra_rows
+        )
+    )
+
+    replacement_merge_cells = (
+        merge_cells_match.group(1)
+        + str(merge_count)
+        + merge_cells_match.group(3)
+        + merge_cells_match.group(4)
+        + new_merge_tags
+        + merge_cells_match.group(5)
+    )
+
+    after_sheet_data = (
+        after_sheet_data[:merge_cells_match.start()]
+        + replacement_merge_cells
+        + after_sheet_data[merge_cells_match.end():]
+    )
+
+    expanded_xml = (
+        before_sheet_data
+        + sheet_data_open
+        + shifted_body
+        + sheet_data_close
+        + after_sheet_data
+    )
+
+    return expanded_xml.encode(
+        "utf-8"
+    )
+
+
+# ============================================================
 # BUILD EXCEL UPDATES
 # ============================================================
 
@@ -465,17 +829,11 @@ def build_excel_updates(payload):
             "were extracted from the PDF."
         )
 
-    if (
+    extra_product_rows = max(
+        0,
         len(line_items)
-        > MAX_PRODUCTS
-    ):
-        raise ValueError(
-            f"The PDF contains "
-            f"{len(line_items)} products, "
-            f"but the final Excel template "
-            f"supports {MAX_PRODUCTS}. "
-            "No product data was removed."
-        )
+        - INVOICE_TEMPLATE_PRODUCT_ROW_COUNT,
+    )
 
     # ========================================================
     # INVOICE NUMBER
@@ -994,10 +1352,13 @@ def build_excel_updates(payload):
             ][
                 "iec"
             ]
-        ] = clean(
-            company.get(
-                "iec"
+        ] = (
+            clean(
+                company.get(
+                    "iec"
+                )
             )
+            or "AAGCD8689R"
         )
 
     if (
@@ -1012,10 +1373,13 @@ def build_excel_updates(payload):
             ][
                 "gstin"
             ]
-        ] = clean(
-            company.get(
-                "gstin"
+        ] = (
+            clean(
+                company.get(
+                    "gstin"
+                )
             )
+            or "29AAGCD8689R1ZB"
         )
 
     if (
@@ -1030,10 +1394,13 @@ def build_excel_updates(payload):
             ][
                 "bank_ad_code"
             ]
-        ] = clean(
-            bank.get(
-                "code"
+        ] = (
+            clean(
+                bank.get(
+                    "code"
+                )
             )
+            or "6361504-8400009"
         )
 
     if (
@@ -1048,10 +1415,13 @@ def build_excel_updates(payload):
             ][
                 "bank_account"
             ]
-        ] = clean(
-            bank.get(
-                "account_number"
+        ] = (
+            clean(
+                bank.get(
+                    "account_number"
+                )
             )
+            or "926030028134123"
         )
 
     if (
@@ -1066,19 +1436,45 @@ def build_excel_updates(payload):
             ][
                 "bank_ifsc"
             ]
-        ] = clean(
-            bank.get(
-                "ifsc"
+        ] = (
+            clean(
+                bank.get(
+                    "ifsc"
+                )
             )
+            or "UTIB0001541"
         )
+
+    # If more than three products are present, the original
+    # totals/bank/packing section is moved down by the same
+    # number of newly inserted product rows. Shift only those
+    # static Invoice-sheet update references here.
+    if extra_product_rows:
+        invoice_updates = {
+            shift_cell_reference(
+                reference,
+                INVOICE_STATIC_START_ROW,
+                extra_product_rows,
+            ): change
+            for reference, change
+            in invoice_updates.items()
+        }
 
     # ========================================================
     # CLEAR PRODUCT ROWS
     # ========================================================
 
-    for slot in (
-        INVOICE_PRODUCT_ROWS
+    product_row_count = max(
+        INVOICE_TEMPLATE_PRODUCT_ROW_COUNT,
+        len(line_items),
+    )
+
+    for product_index in range(
+        product_row_count
     ):
+        slot = invoice_product_slot(
+            product_index
+        )
         invoice_updates[
             slot[
                 "sr_no"
@@ -1143,10 +1539,8 @@ def build_excel_updates(payload):
     ) in enumerate(
         line_items
     ):
-        slot = (
-            INVOICE_PRODUCT_ROWS[
-                index
-            ]
+        slot = invoice_product_slot(
+            index
         )
 
         description = (
@@ -1507,15 +1901,9 @@ def build_excel_updates(payload):
             "shipping_bill_declaration"
         ]:
             (
-                "We here by declare that "
-                "we are the SELLER / CONSIGNOR "
-                "of the goods in Respect of which "
-                "this declaration made and that "
-                "particulars given to shipping Bill No: "
-                f"{shipping_bill or ''} "
-                "Date "
-                f"{shipping_date_slash or ''} "
-                "are true and that :"
+                "We here by declare that we are the SELLER / CONSIGNOR of the goods\\n"
+                "in Respect of which this declaration made and that particulars given to shipping Bill\\n"
+                f"No: {shipping_bill or ''} Date {shipping_date_slash or ''} are true and that :"
             ),
     }
 
@@ -1625,6 +2013,106 @@ def build_excel_updates(payload):
         )
     )
 
+    # AlumSteel short product summary for downloaded Excel.
+    # Keep this consistent with the website preview:
+    # Product :-
+    # Part # <part number>
+    # Aluminium / Steel
+    alum_product_entries = []
+
+    for index, item in enumerate(line_items):
+
+        part = clean(
+            item.get("part_number")
+        )
+
+        material_source = " ".join(
+            value
+            for value in [
+                clean(item.get("material")),
+                clean(item.get("description")),
+            ]
+            if value
+        )
+
+        material_lower = (
+            material_source.lower()
+        )
+
+        material_type = ""
+
+        if any(
+            token in material_lower
+            for token in [
+                "aluminium",
+                "aluminum",
+                "en aw-",
+                "en aw ",
+                "aw-6061",
+                "aw 6061",
+                "aw-6082",
+                "aw 6082",
+                "aw-7075",
+                "aw 7075",
+                "aw-5083",
+                "aw 5083",
+                "al-mg",
+                "almg",
+            ]
+        ):
+            material_type = "Aluminium"
+
+        elif any(
+            token in material_lower
+            for token in [
+                "stainless steel",
+                "steel",
+                "aisi",
+                "sus ",
+                "ss304",
+                "ss 304",
+                "ss316",
+                "ss 316",
+                "304l",
+                "316l",
+                "17-4ph",
+                "17-4 ph",
+                "42crmo4",
+                "s235",
+                "s275",
+                "s355",
+            ]
+        ):
+            material_type = "Steel"
+
+        lines = []
+
+        if part:
+            lines.append(
+                f"Part # {part}"
+            )
+
+        if material_type:
+            lines.append(
+                material_type
+            )
+
+        if lines:
+            alum_product_entries.append(
+                "\n".join(lines)
+            )
+
+    alum_product_text = "Product :-"
+
+    if alum_product_entries:
+        alum_product_text += (
+            "\n"
+            + "\n\n".join(
+                alum_product_entries
+            )
+        )
+
+
     updates[
         SHEETS[
             "alum"
@@ -1635,12 +2123,7 @@ def build_excel_updates(payload):
         ][
             "product"
         ]:
-            (
-                "Product:- "
-                f"{all_products_text}"
-                if all_products_text
-                else None
-            ),
+            alum_product_text,
 
         CELLS[
             "alum"
@@ -1674,7 +2157,7 @@ def build_excel_updates(payload):
         ]:
             (
                 "Title       : "
-                f"{first_title}"
+                f"{' '.join(first_title.split())}"
                 if first_title
                 else "Title       :"
             ),
@@ -1746,8 +2229,15 @@ def build_excel_updates(payload):
             "product"
         ]:
             (
-                "Product description:- "
-                f"{all_products_text or ''}"
+                "Product description:-"
+                + chr(10)
+                + chr(10).join(
+                    " ".join(
+                        value.replace("\\n", " ").split()
+                    )
+                    for value in all_product_descriptions
+                    if value
+                )
             ),
 
         CELLS[
@@ -2176,6 +2666,940 @@ def patch_sheet(
 # VALIDATE GENERATED XLSX
 # ============================================================
 
+
+# DOC_PORT_SMART_ROW_HEIGHT_V2
+# ============================================================
+# CONTENT-AWARE GENERATED EXCEL ROW HEIGHTS
+#
+# Keeps workbook compact for A4 while preventing text clipping.
+# It does not alter:
+# - wording
+# - borders
+# - columns
+# - formulas
+# - merged cells
+# - website preview
+# - print-area settings
+# ============================================================
+
+
+def _smart_value(change):
+    if isinstance(change, dict):
+        value = change.get("value")
+    else:
+        value = change
+
+    if value is None:
+        return ""
+
+    return (
+        str(value)
+        .replace("\\n", "\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
+
+
+def _smart_estimate_lines(
+    value,
+    chars_per_line,
+):
+    value = _smart_value(value)
+
+    if not value:
+        return 1
+
+    chars_per_line = max(
+        15,
+        int(chars_per_line),
+    )
+
+    total = 0
+
+    for part in value.split("\n"):
+        part = part.strip()
+
+        if not part:
+            total += 1
+            continue
+
+        total += max(
+            1,
+            (
+                len(part)
+                + chars_per_line
+                - 1
+            )
+            // chars_per_line,
+        )
+
+    return max(
+        1,
+        total,
+    )
+
+
+def _smart_height(
+    value,
+    chars_per_line,
+    minimum,
+    maximum,
+    line_height=15.0,
+    padding=9.0,
+):
+    lines = _smart_estimate_lines(
+        value,
+        chars_per_line,
+    )
+
+    height = (
+        lines * float(line_height)
+        + float(padding)
+    )
+
+    return max(
+        float(minimum),
+        min(
+            float(maximum),
+            float(height),
+        ),
+    )
+
+
+def _smart_set_row_height(
+    xml_bytes,
+    row_number,
+    height,
+    hidden=False,
+):
+    """
+    Modify ONLY row height/hidden state in worksheet XML.
+    """
+
+    xml_text = xml_bytes.decode(
+        "utf-8"
+    )
+
+    worksheet_match = re.search(
+        r"<(?P<prefix>[A-Za-z_][\w.\-]*:)?worksheet\b",
+        xml_text,
+    )
+
+    prefix = (
+        worksheet_match.group("prefix")
+        if worksheet_match
+        else ""
+    ) or ""
+
+    row_tag = re.escape(
+        prefix + "row"
+    )
+
+    pattern = re.compile(
+        rf'(<{row_tag}\b'
+        rf'(?=[^>]*\br="{int(row_number)}")'
+        rf'[^>]*>)'
+    )
+
+    match = pattern.search(
+        xml_text
+    )
+
+    if not match:
+        return xml_bytes
+
+    tag = match.group(1)
+
+    # Remove ONLY height/hidden attributes.
+    tag = re.sub(
+        r'\s+(?:ht|customHeight|hidden)="[^"]*"',
+        "",
+        tag,
+    )
+
+    tag = tag[:-1]
+
+    tag += (
+        f' ht="{float(height):.2f}"'
+        ' customHeight="1"'
+    )
+
+    if hidden:
+        tag += ' hidden="1"'
+
+    tag += ">"
+
+    xml_text = (
+        xml_text[:match.start()]
+        + tag
+        + xml_text[match.end():]
+    )
+
+    return xml_text.encode(
+        "utf-8"
+    )
+
+
+def optimize_generated_row_heights(
+    xml_bytes,
+    sheet_name,
+    changes,
+    payload,
+):
+    """
+    Apply compact content-aware row heights only where needed.
+    """
+
+    # ========================================================
+    # FORM SDF + EVD
+    #
+    # Already manually finalized. Do not touch.
+    # ========================================================
+
+    if sheet_name in (
+        SHEETS.get("sdf"),
+        SHEETS.get("evd"),
+    ):
+        return xml_bytes
+
+
+    # ========================================================
+    # INVOICE
+    # ========================================================
+
+    if sheet_name == SHEETS["invoice"]:
+
+        extracted = payload.get(
+            "extracted"
+        )
+
+        if not isinstance(
+            extracted,
+            dict,
+        ):
+            extracted = payload
+
+        items = get_line_items(
+            extracted
+        )
+
+        product_count = len(
+            items
+        )
+
+        # ----------------------------------------------------
+        # ACTIVE PRODUCT ROWS
+        #
+        # 1 product = 1 compact row
+        # 4 products = 4 individually-sized rows
+        # etc.
+        # ----------------------------------------------------
+
+        for index in range(
+            product_count
+        ):
+
+            row = (
+                INVOICE_PRODUCT_START_ROW
+                + index
+            )
+
+            description_ref = (
+                f"D{row}"
+            )
+
+            description = (
+                changes.get(
+                    description_ref
+                )
+            )
+
+            height = _smart_height(
+                description,
+                chars_per_line=46,
+                minimum=50,
+                maximum=160,
+                line_height=17,
+                padding=18,
+            )
+
+            xml_bytes = (
+                _smart_set_row_height(
+                    xml_bytes,
+                    row,
+                    height,
+                    hidden=False,
+                )
+            )
+
+        # ----------------------------------------------------
+        # UNUSED ORIGINAL TEMPLATE PRODUCT ROWS
+        #
+        # Example:
+        # 1 product => rows 28 and 29 consume NO print space.
+        # ----------------------------------------------------
+
+        if (
+            product_count
+            < INVOICE_TEMPLATE_PRODUCT_ROW_COUNT
+        ):
+
+            for row in range(
+                (
+                    INVOICE_PRODUCT_START_ROW
+                    + product_count
+                ),
+                (
+                    INVOICE_PRODUCT_START_ROW
+                    + INVOICE_TEMPLATE_PRODUCT_ROW_COUNT
+                ),
+            ):
+
+                xml_bytes = (
+                    _smart_set_row_height(
+                        xml_bytes,
+                        row,
+                        2.0,
+                        hidden=True,
+                    )
+                )
+
+        return xml_bytes
+
+
+    # ========================================================
+    # DHL EXPRESS SLI
+    #
+    # Resize only dynamically generated long values.
+    # Existing fixed form structure stays intact.
+    # ========================================================
+
+    if sheet_name == SHEETS["dhl"]:
+
+        row_requirements = {}
+
+        for reference, change in (
+            changes.items()
+        ):
+
+            value = _smart_value(
+                change
+            )
+
+            if not value:
+                continue
+
+            row_match = re.search(
+                r"(\d+)$",
+                str(reference),
+            )
+
+            if not row_match:
+                continue
+
+            row = int(
+                row_match.group(1)
+            )
+
+            # Short values such as invoice no/date/weight
+            # already fit correctly.
+            if (
+                len(value) < 45
+                and "\n" not in value
+            ):
+                continue
+
+            height = _smart_height(
+                value,
+                chars_per_line=58,
+                minimum=24,
+                maximum=74,
+                line_height=15,
+                padding=8,
+            )
+
+            row_requirements[row] = max(
+                row_requirements.get(
+                    row,
+                    0,
+                ),
+                height,
+            )
+
+        for row, height in (
+            row_requirements.items()
+        ):
+            xml_bytes = (
+                _smart_set_row_height(
+                    xml_bytes,
+                    row,
+                    height,
+                    hidden=False,
+                )
+            )
+
+        # DOC_PORT_DHL_EXACT_HEIGHT_OVERRIDE_V2
+        # Final compact DHL heights.
+        # These run AFTER normal content-aware sizing so the
+        # known oversized areas cannot become large again.
+        exact_dhl_heights = {
+            13: 15.0,
+            14: 15.0,
+            15: 15.0,
+            16: 15.0,
+            18: 48.0,
+            44: 34.0,
+            45: 28.0,
+            46: 36.0,
+        }
+
+        for exact_row, exact_height in exact_dhl_heights.items():
+            xml_bytes = _smart_set_row_height(
+                xml_bytes,
+                exact_row,
+                exact_height,
+                hidden=False,
+            )
+
+        return xml_bytes
+
+
+    # ========================================================
+    # ALUMINIUM / STEEL DERIVATIVES
+    # ========================================================
+
+    if sheet_name == SHEETS["alum"]:
+
+        row_requirements = {}
+
+        for reference, change in (
+            changes.items()
+        ):
+
+            value = _smart_value(
+                change
+            )
+
+            if not value:
+                continue
+
+            row_match = re.search(
+                r"(\d+)$",
+                str(reference),
+            )
+
+            if not row_match:
+                continue
+
+            row = int(
+                row_match.group(1)
+            )
+
+            if (
+                len(value) < 45
+                and "\n" not in value
+            ):
+                continue
+
+            height = _smart_height(
+                value,
+                chars_per_line=82,
+                minimum=24,
+                maximum=78,
+                line_height=15,
+                padding=9,
+            )
+
+            row_requirements[row] = max(
+                row_requirements.get(
+                    row,
+                    0,
+                ),
+                height,
+            )
+
+        for row, height in (
+            row_requirements.items()
+        ):
+            xml_bytes = (
+                _smart_set_row_height(
+                    xml_bytes,
+                    row,
+                    height,
+                    hidden=False,
+                )
+            )
+
+        # DOC_PORT_ALUM_PRODUCT_DYNAMIC_HEIGHT_V1
+        # ----------------------------------------------------
+        # ALUMINUM / STEEL DERIVATIVES PRODUCT BOX
+        #
+        # Layout:
+        #
+        # Product :-
+        # Part # XXXXX
+        # Aluminium / Steel
+        #
+        # Part # XXXXX
+        # Aluminium / Steel
+        #
+        # The product row grows according to actual product
+        # count so no product is cut in Excel or A4/PDF output.
+        # ----------------------------------------------------
+
+        extracted = payload.get("extracted")
+
+        if not isinstance(extracted, dict):
+            extracted = payload
+
+        alum_items = get_line_items(
+            extracted
+        )
+
+        alum_product_count = max(
+            1,
+            len(alum_items),
+        )
+
+        # Required visual lines:
+        #
+        # 1 heading line
+        # + 2 lines per product
+        # + 1 blank separator between products
+        #
+        # This simplifies to approximately 3 lines per product.
+        required_alum_lines = (
+            3 * alum_product_count
+        )
+
+        alum_product_height = (
+            required_alum_lines * 15.0
+            + 10.0
+        )
+
+        # Minimum keeps a 1-product document neat.
+        alum_product_height = max(
+            55.0,
+            alum_product_height,
+        )
+
+        xml_bytes = _smart_set_row_height(
+            xml_bytes,
+            2,
+            alum_product_height,
+            hidden=False,
+        )
+
+        return xml_bytes
+
+
+    # ========================================================
+    # SCOMET DECLARATION
+    # ========================================================
+
+    if sheet_name == SHEETS["scomet"]:
+
+        # Product description row C5:H5.
+        product_value = (
+            changes.get(
+                CELLS["scomet"]["product"]
+            )
+        )
+
+        if product_value:
+
+            product_height = (
+                _smart_height(
+                    product_value,
+                    chars_per_line=82,
+                    minimum=42,
+                    maximum=165,
+                    line_height=15,
+                    padding=10,
+                )
+            )
+
+            xml_bytes = (
+                _smart_set_row_height(
+                    xml_bytes,
+                    5,
+                    product_height,
+                    hidden=False,
+                )
+            )
+
+        # Static declaration wording:
+        # compact enough for A4 but enough to avoid clipping.
+        compact_rows = {
+            8: 58.0,
+            9: 82.0,
+            10: 68.0,
+            11: 54.0,
+            13: 34.0,
+            14: 34.0,
+        }
+
+        for row, height in (
+            compact_rows.items()
+        ):
+
+            xml_bytes = (
+                _smart_set_row_height(
+                    xml_bytes,
+                    row,
+                    height,
+                    hidden=False,
+                )
+            )
+
+        return xml_bytes
+
+
+    return xml_bytes
+
+
+
+
+
+# DOC_PORT_DYNAMIC_INVOICE_PRINT_AREA
+def update_dynamic_invoice_print_area(
+    workbook_path,
+    payload,
+):
+    """
+    Keep Invoice Print_Area synchronized with dynamically inserted
+    product rows.
+
+    <= 3 products : A1:O41
+    4 products    : A1:O42
+    5 products    : A1:O43
+    etc.
+    """
+
+    extracted = payload.get("extracted")
+
+    if not isinstance(extracted, dict):
+        extracted = payload
+
+    product_count = len(
+        get_line_items(extracted)
+    )
+
+    extra_rows = max(
+        0,
+        product_count
+        - INVOICE_TEMPLATE_PRODUCT_ROW_COUNT,
+    )
+
+    last_row = 41 + extra_rows
+
+    workbook_path = Path(
+        workbook_path
+    )
+
+    temp_path = workbook_path.with_name(
+        workbook_path.stem
+        + ".printarea.tmp.xlsx"
+    )
+
+    found_invoice_area = False
+
+    with zipfile.ZipFile(
+        workbook_path,
+        "r",
+    ) as source_zip:
+
+        with zipfile.ZipFile(
+            temp_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as output_zip:
+
+            for info in source_zip.infolist():
+
+                data = source_zip.read(
+                    info.filename
+                )
+
+                if (
+                    info.filename
+                    == "xl/workbook.xml"
+                ):
+
+                    xml_text = data.decode(
+                        "utf-8"
+                    )
+
+                    pattern = re.compile(
+                        r'('
+                        r'<(?:[A-Za-z_][\w.\-]*:)?definedName\b'
+                        r'[^>]*'
+                        r'name="_xlnm\.Print_Area"'
+                        r'[^>]*>'
+                        r')'
+                        r'([^<]*)'
+                        r'('
+                        r'</(?:[A-Za-z_][\w.\-]*:)?definedName>'
+                        r')'
+                    )
+
+                    def replace_area(match):
+                        nonlocal found_invoice_area
+
+                        formula = match.group(2)
+
+                        if not (
+                            "Invoice!"
+                            in formula
+                            or "'Invoice'!"
+                            in formula
+                        ):
+                            return match.group(0)
+
+                        new_formula, count = re.subn(
+                            r'\$A\$1:\$O\$\d+',
+                            (
+                                "$A$1:$O$"
+                                + str(last_row)
+                            ),
+                            formula,
+                            count=1,
+                        )
+
+                        if count != 1:
+                            return match.group(0)
+
+                        found_invoice_area = True
+
+                        return (
+                            match.group(1)
+                            + new_formula
+                            + match.group(3)
+                        )
+
+                    xml_text = pattern.sub(
+                        replace_area,
+                        xml_text,
+                    )
+
+                    data = xml_text.encode(
+                        "utf-8"
+                    )
+
+                output_zip.writestr(
+                    info,
+                    data,
+                )
+
+    if not found_invoice_area:
+
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        raise ValueError(
+            "Invoice Print_Area definition was not found."
+        )
+
+    temp_path.replace(
+        workbook_path
+    )
+
+
+
+
+
+# DOC_PORT_INVOICE_PRINTAREA_FINAL_V2
+def ensure_dynamic_invoice_print_area(
+    workbook_path,
+    payload,
+):
+    """
+    Keep the Invoice printable area synchronized with dynamically
+    inserted product rows.
+
+    Base:
+        1-3 products -> A1:O41
+
+    Additional products:
+        4 products   -> A1:O42
+        5 products   -> A1:O43
+        etc.
+
+    Only workbook Print_Area metadata is changed.
+    """
+
+    extracted = payload.get(
+        "extracted"
+    )
+
+    if not isinstance(
+        extracted,
+        dict,
+    ):
+        extracted = payload
+
+    product_count = len(
+        get_line_items(
+            extracted
+        )
+    )
+
+    extra_product_rows = max(
+        0,
+        product_count
+        - INVOICE_TEMPLATE_PRODUCT_ROW_COUNT,
+    )
+
+    last_print_row = (
+        41
+        + extra_product_rows
+    )
+
+    workbook_path = Path(
+        workbook_path
+    )
+
+    temp_path = workbook_path.with_name(
+        workbook_path.stem
+        + ".printarea-final.tmp.xlsx"
+    )
+
+    invoice_area_found = False
+
+    with zipfile.ZipFile(
+        workbook_path,
+        "r",
+    ) as source_zip:
+
+        with zipfile.ZipFile(
+            temp_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as target_zip:
+
+            for info in source_zip.infolist():
+
+                data = source_zip.read(
+                    info.filename
+                )
+
+                if (
+                    info.filename
+                    == "xl/workbook.xml"
+                ):
+
+                    xml_text = data.decode(
+                        "utf-8"
+                    )
+
+                    pattern = re.compile(
+                        r'('
+                        r'<(?:[A-Za-z_][\w.\-]*:)?definedName\b'
+                        r'[^>]*'
+                        r'\bname="_xlnm\.Print_Area"'
+                        r'[^>]*>'
+                        r')'
+                        r'(.*?)'
+                        r'('
+                        r'</(?:[A-Za-z_][\w.\-]*:)?definedName>'
+                        r')',
+                        re.DOTALL,
+                    )
+
+                    def replace_print_area(match):
+                        nonlocal invoice_area_found
+
+                        formula = match.group(2)
+
+                        if not re.search(
+                            r"(?:'Invoice'|Invoice)!",
+                            formula,
+                        ):
+                            return match.group(0)
+
+                        new_formula, count = re.subn(
+                            r"\$A\$1:\$O\$\d+",
+                            (
+                                "$A$1:$O$"
+                                + str(last_print_row)
+                            ),
+                            formula,
+                            count=1,
+                        )
+
+                        if count != 1:
+                            return match.group(0)
+
+                        invoice_area_found = True
+
+                        return (
+                            match.group(1)
+                            + new_formula
+                            + match.group(3)
+                        )
+
+                    xml_text = pattern.sub(
+                        replace_print_area,
+                        xml_text,
+                    )
+
+                    data = xml_text.encode(
+                        "utf-8"
+                    )
+
+                target_zip.writestr(
+                    info,
+                    data,
+                )
+
+    if not invoice_area_found:
+
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        raise ValueError(
+            "Invoice Print_Area could not be located "
+            "inside workbook.xml."
+        )
+
+    # ========================================================
+    # VERIFY BEFORE REPLACING ORIGINAL
+    # ========================================================
+
+    expected = (
+        "$A$1:$O$"
+        + str(last_print_row)
+    )
+
+    with zipfile.ZipFile(
+        temp_path,
+        "r",
+    ) as check_zip:
+
+        workbook_xml = check_zip.read(
+            "xl/workbook.xml"
+        ).decode(
+            "utf-8"
+        )
+
+        if expected not in workbook_xml:
+            raise ValueError(
+                "Dynamic Invoice PrintArea verification failed. "
+                f"Expected {expected}."
+            )
+
+    temp_path.replace(
+        workbook_path
+    )
+
+
+
+
 def validate_generated_xlsx(
     path
 ):
@@ -2299,6 +3723,16 @@ def generate_excel(
         )
     )
 
+    line_items = get_line_items(
+        extracted_data
+    )
+
+    extra_product_rows = max(
+        0,
+        len(line_items)
+        - INVOICE_TEMPLATE_PRODUCT_ROW_COUNT,
+    )
+
     with zipfile.ZipFile(
         TEMPLATE_PATH,
         "r",
@@ -2340,17 +3774,34 @@ def generate_excel(
                 )
             )
 
-            # IMPORTANT:
-            #
-            # No row insertion or deletion happens here.
-            # The master template already contains the correct
-            # US row / heading / product-row structure.
-            #
-            # We only replace values in existing cells.
+            # The Invoice master starts with three formatted product
+            # rows. Add more rows only when the uploaded invoice has
+            # more than three products. All other sheets are untouched.
+            if (
+                sheet_name
+                == SHEETS["invoice"]
+                and extra_product_rows > 0
+            ):
+                original_xml = (
+                    expand_invoice_product_rows(
+                        original_xml,
+                        extra_product_rows,
+                    )
+                )
+
             patched_xml = (
                 patch_sheet(
                     original_xml,
                     changes,
+                )
+            )
+
+            patched_xml = (
+                optimize_generated_row_heights(
+                    patched_xml,
+                    sheet_name,
+                    changes,
+                    payload,
                 )
             )
 
@@ -2388,6 +3839,16 @@ def generate_excel(
                     zip_info,
                     file_data,
                 )
+
+    update_dynamic_invoice_print_area(
+        output_path,
+        payload,
+    )
+
+    ensure_dynamic_invoice_print_area(
+        output_path,
+        payload,
+    )
 
     validate_generated_xlsx(
         output_path

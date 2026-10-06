@@ -1173,14 +1173,14 @@ export default function ViewerPage({
             <div
               className="fileTitle"
             >
-              {viewerFileName} â€” Generated
+              {viewerFileName} — Generated
             </div>
 
 
             <div
               className="fileSub"
             >
-              All six original sheets â€¢ no shortened wording
+              All six original sheets • no shortened wording
             </div>
           </div>
         </div>
@@ -1339,8 +1339,11 @@ export default function ViewerPage({
                     activeSheet
                   }
                 >
-                  {name}
-                </button>
+                  {name ===
+                  'AlumSteel Derivatives declarati'
+                    ? 'AlumSteel Derivatives declaration'
+                    : name}
+              </button>
               )
             )
           }

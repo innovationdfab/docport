@@ -3,7 +3,7 @@ SHEETS = {
     "dhl": "Dhl Express SLI",
     "sdf": "FORM SDF",
     "evd": "EVD",
-    "alum": "AlumSteel Derivatives declarati",
+    "alum": "AlumSteel Derivatives Decl.",
     "scomet": "Scomet Declaration",
 }
 
@@ -72,13 +72,13 @@ CELLS = {
     # 3. FORM SDF
     # ========================================================
     "sdf": {
-        "shipping_bill_header": "C2",
+        "shipping_bill_header": "E2",
 
         # Actual visible SDF date.
-        "date": "G2",
+        "date": "I2",
 
         # Sentence also contains the same dynamic date.
-        "shipping_bill_declaration": "B4",
+        "shipping_bill_declaration": "D4",
     },
 
 
@@ -133,13 +133,13 @@ CELLS = {
     # 6. SCOMET DECLARATION
     # ========================================================
     "scomet": {
-        "invoice_number": "A4",
+        "invoice_number": "C4",
 
         # Actual SCOMET date cell.
-        "invoice_date": "D4",
+        "invoice_date": "F4",
 
-        "product": "A5",
-        "hsn_code": "A6",
+        "product": "C5",
+        "hsn_code": "C6",
     },
 }
 

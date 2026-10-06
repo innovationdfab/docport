@@ -422,8 +422,10 @@ async def extract_invoice(
             r"(\d{6,12})\s+"
             r"([A-Za-z][A-Za-z\s]*?)\s+"
             r"(\d+)\s+"
+            r"(?:US|USD|EUR|GBP|INR)?\s*"
             r"([$€£₹]?)\s*"
             r"([\d,]+(?:\.\d+)?)\s+"
+            r"(?:US|USD|EUR|GBP|INR)?\s*"
             r"([$€£₹]?)\s*"
             r"([\d,]+(?:\.\d+)?)\s*$"
         )
@@ -603,6 +605,7 @@ async def extract_invoice(
         totals_match = re.search(
             (
                 r"Q-ty\s*:\s*(\d+)\s+"
+                r"(?:US|USD|EUR|GBP|INR)?\s*"
                 r"([$€£₹]?)\s*"
                 r"([\d,]+(?:\.\d+)?)"
             ),

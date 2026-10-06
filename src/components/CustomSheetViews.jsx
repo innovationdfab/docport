@@ -2183,32 +2183,87 @@ const shippingBillDate =
 
 
           if (productRow) {
+
             productRow.style.whiteSpace =
               'pre-line'
 
-            productRow.style.overflowWrap =
-              'anywhere'
+            const productSummary =
+              (lineItems || [])
+                .map((item) => {
 
-            productRow.style.height =
-              'auto'
+                  const partNumber =
+                    isMissing(
+                      item?.part_number
+                    )
+                      ? ''
+                      : String(
+                          item.part_number
+                        ).trim()
 
+                  const materialSource =
+                    [
+                      item?.material,
+                      item?.description,
+                    ]
+                      .filter(
+                        (value) =>
+                          !isMissing(value)
+                      )
+                      .join(' ')
+                      .toLowerCase()
 
-            bindField(
+                  let materialType = ''
+
+                  if (
+                    /aluminium|aluminum|\b6061\b|\b6082\b|\b7075\b|\b5083\b|\b(?:en\s*)?aw[-\s]?\d+|\bal[-\s]?mg/i.test(
+                      materialSource
+                    )
+                  ) {
+                    materialType =
+                      'Aluminium'
+                  }
+                  else if (
+                    /stainless|\bsteel\b|\baisi\b|\bsus\b|\b304l?\b|\b316l?\b|\b321\b|\b410\b|\b430\b|17[-\s]?4\s*ph|42crmo4|\bs235\b|\bs275\b|\bs355\b/i.test(
+                      materialSource
+                    )
+                  ) {
+                    materialType =
+                      'Steel'
+                  }
+
+                  const lines = []
+
+                  if (partNumber) {
+                    lines.push(
+                      `Part # ${partNumber}`
+                    )
+                  }
+
+                  if (materialType) {
+                    lines.push(
+                      materialType
+                    )
+                  }
+
+                  return lines.join(
+                    '\n'
+                  )
+                })
+                .filter(Boolean)
+                .join('\n\n')
+
+            setNormalValue(
               productRow,
-              !isMissing(
-                shipment.alum_product_text_override
-              )
-                ? shipment.alum_product_text_override
-                : allProductDescription(
-                    lineItems
-                  ),
-              'shipment',
-              'alum_product_text_override',
-              {
-                multiline:
-                  true,
-              }
+              productSummary
+                ? `Product :-\n${productSummary}`
+                : 'Product :-'
             )
+
+            productRow.classList.toggle(
+              'missing-cell',
+              !productSummary
+            )
+
           }
 
 

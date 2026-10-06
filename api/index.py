@@ -30,7 +30,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 # Existing approved DocPort Excel system.
-from excel_generator import generate_excel, MAX_PRODUCTS
+from excel_generator import generate_excel
 
 # New deterministic local invoice parser.
 from local_invoice_parser import (
@@ -618,6 +618,17 @@ async def extract_with_gemini_fallback(
 async def smart_extract_invoice(
     pdf_bytes: bytes,
 ):
+    # DOCPORT_RESILIENT_LOCAL_FALLBACK_V1
+    #
+    # Production extraction policy:
+    #
+    # 1. Extract PDF text locally.
+    # 2. Parse locally first.
+    # 3. If local result is complete -> return immediately.
+    # 4. If local result is partial but contains products,
+    #    retain it as a safe fallback.
+    # 5. Gemini may improve an incomplete result.
+    # 6. Gemini failure MUST NOT destroy a usable local result.
 
     # --------------------------------------------------------
     # STEP 1
@@ -636,12 +647,12 @@ async def smart_extract_invoice(
         )
     )
 
+    local_candidate = None
+    local_candidate_usable = False
+
     # --------------------------------------------------------
     # STEP 2
-    # Try local deterministic parser first.
-    #
-    # NO GEMINI
-    # NO AI TOKENS
+    # Deterministic local parser first.
     # --------------------------------------------------------
 
     if has_usable_invoice_text(
@@ -660,15 +671,47 @@ async def smart_extract_invoice(
                 )
             )
 
-            if local_result_is_complete(
-                local_data
-            ):
+            # Validate whatever the deterministic parser found.
+            #
+            # Even when local_result_is_complete() is False,
+            # this may still contain valid invoice/product data
+            # that is better than failing the entire request.
+            try:
 
-                extracted = (
+                local_candidate = (
                     ExtractedData.model_validate(
                         local_data
                     )
                 )
+
+                local_candidate_usable = (
+                    len(
+                        local_candidate
+                        .product
+                        .line_items
+                    )
+                    > 0
+                )
+
+            except Exception as validation_exc:
+
+                print(
+                    (
+                        "Local parser result could not "
+                        "be validated: "
+                        f"{validation_exc}"
+                    )
+                )
+
+                local_candidate = None
+                local_candidate_usable = False
+
+            if (
+                local_candidate is not None
+                and local_result_is_complete(
+                    local_data
+                )
+            ):
 
                 print(
                     "========================================"
@@ -687,17 +730,37 @@ async def smart_extract_invoice(
                 )
 
                 return (
-                    extracted,
+                    local_candidate,
                     invoice_text,
                     "local_parser",
                 )
 
-            print(
-                (
-                    "Local parser did not find "
-                    "enough required fields."
+            if local_candidate_usable:
+
+                print(
+                    (
+                        "Local parser produced a usable "
+                        "partial invoice with "
+                        f"{len(local_candidate.product.line_items)} "
+                        "product line item(s)."
+                    )
                 )
-            )
+
+                print(
+                    (
+                        "Gemini will be attempted only "
+                        "as an enhancement."
+                    )
+                )
+
+            else:
+
+                print(
+                    (
+                        "Local parser did not find enough "
+                        "usable invoice/product data."
+                    )
+                )
 
         except Exception as exc:
 
@@ -719,24 +782,71 @@ async def smart_extract_invoice(
 
     # --------------------------------------------------------
     # STEP 3
-    # Only now use Gemini.
+    # Gemini fallback/enhancement.
     # --------------------------------------------------------
 
     print(
         "Using Gemini PDF fallback..."
     )
 
-    extracted = (
-        await extract_with_gemini_fallback(
-            pdf_bytes
-        )
-    )
+    try:
 
-    return (
-        extracted,
-        invoice_text,
-        "gemini_pdf_fallback",
-    )
+        extracted = (
+            await extract_with_gemini_fallback(
+                pdf_bytes
+            )
+        )
+
+        return (
+            extracted,
+            invoice_text,
+            "gemini_pdf_fallback",
+        )
+
+    except Exception as exc:
+
+        # CRITICAL PRODUCTION SAFETY:
+        #
+        # If the deterministic parser already produced real
+        # product data, Gemini quota/rate-limit/configuration
+        # problems must not make the whole website fail.
+
+        if (
+            local_candidate is not None
+            and local_candidate_usable
+        ):
+
+            print(
+                "========================================"
+            )
+
+            print(
+                (
+                    "GEMINI UNAVAILABLE - "
+                    "USING LOCAL PARSER RESULT"
+                )
+            )
+
+            print(
+                (
+                    "Gemini error: "
+                    f"{exc}"
+                )
+            )
+
+            print(
+                "========================================"
+            )
+
+            return (
+                local_candidate,
+                invoice_text,
+                "local_parser_partial",
+            )
+
+        # No usable local products existed.
+        # In this specific case Gemini genuinely was required.
+        raise
 
 
 # ============================================================
@@ -1005,19 +1115,6 @@ async def extract_invoice(
                 detail=(
                     "No product line items "
                     "were detected."
-                ),
-            )
-
-        if product_count > MAX_PRODUCTS:
-
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"The invoice contains "
-                    f"{product_count} products, "
-                    f"but the approved Excel "
-                    f"template currently supports "
-                    f"{MAX_PRODUCTS} products."
                 ),
             )
 

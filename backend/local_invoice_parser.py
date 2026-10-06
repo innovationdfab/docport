@@ -383,9 +383,9 @@ def parse_products(
         r"(?P<country>[A-Za-z][A-Za-z ]*?)"
         r"\s+"
         r"(?P<quantity>\d+)"
-        r"\s+\$"
+        r"\s+(?:US|USD)?\s*\$"
         r"(?P<unit_price>\d+(?:\.\d+)?)"
-        r"\s+\$"
+        r"\s+(?:US|USD)?\s*\$"
         r"(?P<position_price>\d+(?:\.\d+)?)",
         flags=re.I,
     )
@@ -494,7 +494,7 @@ def parse_shipment(
         r"(\d+(?:\.\d+)?)\s*kg"
         r"\s+Q-ty:\s*"
         r"(\d+)"
-        r"\s+\$"
+        r"\s+(?:US|USD)?\s*\$"
         r"(\d+(?:\.\d+)?)",
         text,
         flags=re.I | re.S,

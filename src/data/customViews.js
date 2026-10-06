@@ -887,9 +887,7 @@ export const customViewsHtml = `
           <table class="mini">
 
             <tr>
-              <td class="label signature-box">
-                Signature / Date / Co stamp.
-              </td>
+              <td class="label signature-box" style="vertical-align: bottom; padding-bottom: 6px;">Signature / Date / Co stamp.</td>
             </tr>
 
             <tr>
@@ -1732,7 +1730,7 @@ export const customViewsHtml = `
               <td>
                 B/E COPY, IMP INV/PKG LIST/
                 GR WAIVER ON GR FORM,
-                CHARTERED ENGG CERTIFI
+                CHARTERED ENGG CERTIFICATE
               </td>
             </tr>
 
@@ -1983,10 +1981,7 @@ export const customViewsHtml = `
 
       <tr>
 
-        <td
-          class="sdf-title"
-          colspan="2"
-        >
+        <td class="sdf-title" colspan="2" style="background:#ffd400 !important;">
           FORM SDF
         </td>
 
@@ -2689,10 +2684,7 @@ export const customViewsHtml = `
 
       <tr>
 
-        <td
-          class="title-main"
-          colspan="2"
-        >
+        <td class="title-main" colspan="2" style="background:#ffd400 !important;">
           D E C L A R A T I O N
         </td>
 
