@@ -965,6 +965,56 @@ export default function ViewerPage({
             }
           )
 
+          // DOCPORT_AWB_DOWNLOAD_SYNC_V1
+          //
+          // The DHL AWB field is contentEditable.
+          // Always capture the exact value currently visible
+          // in the preview before generating the workbook.
+          //
+          // This prevents the latest AWB edit from being lost
+          // when Download Excel is clicked immediately after
+          // entering the number.
+
+          const currentDhlTable =
+            document.querySelector(
+              '#fixedDhlView > .dhl-sheet-inner > table'
+            )
+
+          const currentAwbRow =
+            Array.from(
+              currentDhlTable?.rows || []
+            ).find(
+              (row) =>
+                row.textContent
+                  ?.toUpperCase()
+                  .includes(
+                    'DHL AIR WAYBILL NUMBER'
+                  )
+            )
+
+          const currentAwbCell =
+            currentAwbRow
+              ?.cells?.[1]
+
+          if (currentAwbCell) {
+
+            const currentAwbValue =
+              currentAwbCell
+                .innerText
+                .trim()
+
+            latestExtracted.shipment = {
+              ...(
+                latestExtracted.shipment ||
+                {}
+              ),
+
+              awb_number:
+                currentAwbValue,
+            }
+          }
+
+
           const latestDocumentData = {
             ...currentDocumentData,
 

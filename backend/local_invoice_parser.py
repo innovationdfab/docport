@@ -384,9 +384,9 @@ def parse_products(
         r"\s+"
         r"(?P<quantity>\d+)"
         r"\s+(?:US|USD)?\s*\$"
-        r"(?P<unit_price>\d+(?:\.\d+)?)"
+        r"(?P<unit_price>\d[\d,]*(?:\.\d+)?)"
         r"\s+(?:US|USD)?\s*\$"
-        r"(?P<position_price>\d+(?:\.\d+)?)",
+        r"(?P<position_price>\d[\d,]*(?:\.\d+)?)",
         flags=re.I,
     )
 
@@ -461,6 +461,9 @@ def parse_products(
                     float(
                         product_match.group(
                             "unit_price"
+                        ).replace(
+                            ",",
+                            "",
                         )
                     ),
 
@@ -468,6 +471,9 @@ def parse_products(
                     float(
                         product_match.group(
                             "position_price"
+                        ).replace(
+                            ",",
+                            "",
                         )
                     ),
             }
@@ -495,7 +501,7 @@ def parse_shipment(
         r"\s+Q-ty:\s*"
         r"(\d+)"
         r"\s+(?:US|USD)?\s*\$"
-        r"(\d+(?:\.\d+)?)",
+        r"(\d[\d,]*(?:\.\d+)?)",
         text,
         flags=re.I | re.S,
     )
@@ -515,7 +521,10 @@ def parse_shipment(
         )
 
         total_amount = float(
-            totals_match.group(4)
+            totals_match.group(4).replace(
+                ",",
+                "",
+            )
         )
 
     return {
