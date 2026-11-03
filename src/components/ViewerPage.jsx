@@ -1011,6 +1011,13 @@ export default function ViewerPage({
 
               awb_number:
                 currentAwbValue,
+
+              // DOCPORT_AWB_DOWNLOAD_SHIPPING_BILL_SYNC_V1
+              //
+              // Use the same DHL AWB value anywhere
+              // the workbook needs Shipping Bill No.
+              shipping_bill_number:
+                currentAwbValue,
             }
           }
 

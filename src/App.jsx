@@ -172,14 +172,29 @@ export default function App() {
 
   const handleFieldChange = useCallback(
     (section, field, value) => {
-      setManualEdits((previous) => ({
-        ...previous,
-
-        [section]: {
+      setManualEdits((previous) => {
+        const nextSection = {
           ...(previous[section] || {}),
           [field]: value,
-        },
-      }))
+        }
+
+        // DOCPORT_AWB_TO_SHIPPING_BILL_SYNC_V1
+        //
+        // DHL Air Waybill Number is the source value
+        // for every Shipping Bill Number field.
+        if (
+          section === 'shipment' &&
+          field === 'awb_number'
+        ) {
+          nextSection.shipping_bill_number =
+            value
+        }
+
+        return {
+          ...previous,
+          [section]: nextSection,
+        }
+      })
     },
     []
   )
