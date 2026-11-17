@@ -6,4 +6,4 @@ google-genai
 python-dotenv
 pypdf
 openpyxl
-PyMuPDF
+PyMuPDF==1.28.2
